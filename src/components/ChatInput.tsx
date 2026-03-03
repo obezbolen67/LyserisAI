@@ -361,7 +361,7 @@ const ChatInput = ({ onSendMessage, onStopGeneration, isSending, isThinkingVisib
         <textarea
           ref={textareaRef}
           className="chat-input"
-          placeholder="Message Workspark"
+          placeholder="Message Lyseris"
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={handleKeyDown}

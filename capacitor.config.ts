@@ -1,8 +1,8 @@
 import { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
-  appId: 'com.worksparkai.app',
-  appName: 'Workspark AI',
+  appId: 'com.lyseris.app',
+  appName: 'Lyseris AI',
   webDir: 'dist',
   server: {
     androidScheme: 'https',

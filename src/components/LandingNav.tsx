@@ -8,7 +8,7 @@ const LandingNav = () => {
       <div className="landing-nav-container">
         {/* --- START OF THE FIX --- */}
         <Link to="/" className="landing-nav-logo">
-          <img src="/worksparkai.svg" alt="Workspark AI Logo" />
+          <img src="/lyseris.svg" alt="Lyseris AI Logo" />
         </Link>
         {/* --- END OF THE FIX --- */}
         <div className="landing-nav-actions">

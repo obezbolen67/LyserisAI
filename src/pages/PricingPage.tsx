@@ -68,7 +68,7 @@ const PricingPage = () => {
     <div className="pricing-page-container">
       <div className="pricing-header">
         <h1>Choose Your Plan</h1>
-        <p>Unlock powerful features and accelerate your workflow with Workspark AI Pro.</p>
+        <p>Unlock powerful features and accelerate your workflow with Lyseris AI Pro.</p>
       </div>
       <div className="pricing-grid">
         {plans.map((plan) => (

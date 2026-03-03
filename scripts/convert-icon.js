@@ -16,7 +16,7 @@ const sizes = {
   'mipmap-xxxhdpi': 192
 };
 
-const svgPath = path.join(__dirname, '..', 'public', 'worksparkai.svg');
+const svgPath = path.join(__dirname, '..', 'public', 'lyseris.svg');
 const androidResPath = path.join(__dirname, '..', 'android', 'app', 'src', 'main', 'res');
 
 async function convertIcons() {

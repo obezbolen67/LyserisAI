@@ -1,9 +1,9 @@
 {
-  "short_name": "Workspark",
-  "name": "Workspark AI",
+  "short_name": "Lyseris",
+  "name": "Lyseris AI",
   "icons": [
     {
-      "src": "worksparkai.svg",
+      "src": "lyseris.svg",
       "sizes": "192x192 512x512",
       "type": "image/svg+xml"
     }

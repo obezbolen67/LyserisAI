@@ -9,6 +9,8 @@
   border: none;
   transition: none;
   width: 100%;
+  --tool-image-scale: 1;
+  --tool-image-height: 220px;
 }
 
 /* --- Header Styling --- */
@@ -104,7 +106,7 @@
 
 /* Image Preview specific */
 .preview-item.image {
-  height: 48px;
+  height: calc(48px * var(--tool-image-scale));
   width: auto;
   min-width: 48px;
   display: flex;
@@ -115,7 +117,7 @@
 .preview-item.image img {
   height: 100%;
   width: auto;
-  max-width: 100px;
+  max-width: calc(110px * var(--tool-image-scale));
   object-fit: cover;
   display: block;
 }
@@ -284,7 +286,10 @@
 }
 
 .console-image img {
-  max-height: 200px;
+  height: calc(var(--tool-image-height) * var(--tool-image-scale));
+  max-height: clamp(160px, 30vh, 320px);
+  max-width: min(100%, 820px);
+  width: auto;
   border-radius: 6px;
   cursor: pointer;
   border: 1px solid #333;
@@ -334,5 +339,17 @@
 @keyframes shine {
   to {
     background-position: 200% center;
+  }
+}
+
+@media (max-width: 640px) {
+  .code-analysis-container {
+    --tool-image-scale: 0.85;
+    --tool-image-height: 180px;
+  }
+
+  .console-image img {
+    max-height: clamp(140px, 26vh, 260px);
+    max-width: 100%;
   }
 }

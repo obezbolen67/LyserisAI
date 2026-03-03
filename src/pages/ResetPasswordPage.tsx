@@ -85,7 +85,7 @@ const ResetPasswordPage = () => {
       </div>
       
       <div className="auth-form-wrapper">
-        <img src="/worksparkai.svg" alt="Workspark AI Logo" className="auth-logo" />
+        <img src="/lyseris.svg" alt="Lyseris AI Logo" className="auth-logo" />
         <h2 className="auth-subtitle">Set New Password</h2>
         <p style={{ 
           color: 'var(--text-secondary)', 

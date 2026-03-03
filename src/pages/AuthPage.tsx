@@ -61,7 +61,7 @@ const AuthPage = () => {
       
       <div className={`auth-form-wrapper ${isFading ? 'fading' : ''}`}>
         {/* --- START OF THE FIX --- */}
-        <img src="/worksparkai.svg" alt="Workspark AI Logo" className="auth-logo" />
+        <img src="/lyseris.svg" alt="Lyseris AI Logo" className="auth-logo" />
         {/* --- END OF THE FIX --- */}
         <h2 className="auth-subtitle">{isLogin ? 'Welcome Back' : 'Create Account'}</h2>
         

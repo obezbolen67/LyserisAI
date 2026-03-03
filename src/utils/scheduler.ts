@@ -217,7 +217,7 @@ export const scheduleClientNotification = async (
           if (task && task.status !== 'completed') {
             new Notification(title, { 
               body: bodyContent, 
-              icon: '/worksparkai.svg',
+              icon: '/lyseris.svg',
               tag: taskId 
             });
             updateTaskStatus(taskId, 'completed');

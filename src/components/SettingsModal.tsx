@@ -520,7 +520,7 @@ const SettingsModal = ({ isOpen, onClose }: SettingsModalProps) => {
     return (
       <>
         <h3>Integrations</h3>
-        <p>Connect Workspark to other services. Available for Pro users.</p>
+        <p>Connect Lyseris to other services. Available for Pro users.</p>
         
         {!isPro && (
           <div className="upgrade-prompt">

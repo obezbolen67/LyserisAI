@@ -54,7 +54,7 @@ const ModelSelector = () => {
         aria-haspopup="true"
         aria-expanded={isOpen}
       >
-        <span>Workspark AI</span>
+        <span>Lyseris AI</span>
         <span className="beta-tag">Beta</span>
         <FiChevronDown size={16} className={isOpen ? 'open' : ''} />
       </button>

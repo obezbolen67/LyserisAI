@@ -20,14 +20,14 @@ self.addEventListener('push', (event) => {
     data = event.data.json();
   } catch (e) {
     // Fallback for DevTools "Test Push" message
-    data = { title: 'Workspark AI', body: event.data.text() };
+    data = { title: 'Lyseris AI', body: event.data.text() };
   }
 
-  const title = data.title || 'Workspark AI';
+  const title = data.title || 'Lyseris AI';
   const options = {
     body: data.body || 'New notification',
-    icon: '/worksparkai.svg', // Make sure this icon exists in public/
-    badge: '/worksparkai.svg',
+    icon: '/lyseris.svg', // Make sure this icon exists in public/
+    badge: '/lyseris.svg',
     vibrate: [100, 50, 100],
     data: {
       url: '/app',

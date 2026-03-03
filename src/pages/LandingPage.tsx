@@ -19,7 +19,7 @@ const features = [
   {
     icon: <FiFileText />,
     title: 'Intelligent Document Analysis',
-    description: "Instantly extract and understand insights from your documents. Workspark AI can read and analyze PDF and PowerPoint files, summarizing content on demand.",
+    description: "Instantly extract and understand insights from your documents. Lyseris AI can read and analyze PDF and PowerPoint files, summarizing content on demand.",
   },
   {
     icon: <FiShare2 />,
@@ -37,7 +37,7 @@ const steps = [
   {
     icon: '🧠',
     title: 'AI Analyzes & Plans',
-    description: 'Workspark AI interprets your request and determines the best tools for the job, whether it\'s running code, searching the web, or analyzing a document.',
+    description: 'Lyseris AI interprets your request and determines the best tools for the job, whether it\'s running code, searching the web, or analyzing a document.',
   },
   {
     icon: '🛠️',
@@ -194,7 +194,7 @@ const LandingPage = () => {
 
         <section className="use-cases-section" ref={(el) => { sectionsRef.current[11] = el; }}>
           <h2 className="section-title">Designed For Doers</h2>
-          <p className="section-subtitle">Whether you're a developer, analyst, or researcher, Workspark accelerates your workflow.</p>
+          <p className="section-subtitle">Whether you're a developer, analyst, or researcher, Lyseris accelerates your workflow.</p>
           <div className="use-cases-grid">
             {useCases.map((useCase, index) => (
               <div key={index} className="use-case-card" style={{ '--glow-color': useCase.color } as React.CSSProperties} ref={(el) => { sectionsRef.current[12 + index] = el; }}>
@@ -218,7 +218,7 @@ const LandingPage = () => {
       </main>
 
       <footer className="landing-footer">
-          <p>&copy; {new Date().getFullYear()} Workspark AI. All rights reserved.</p>
+          <p>&copy; {new Date().getFullYear()} Lyseris AI. All rights reserved.</p>
       </footer>
     </div>
   );

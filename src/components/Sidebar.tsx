@@ -159,8 +159,8 @@ const Sidebar = ({ onOpenSettings, isMobileOpen, onClose, isCollapsed, onToggleC
       <aside className={`sidebar ${isMobileOpen ? 'mobile-open' : ''} ${isCollapsed ? 'is-collapsed' : ''}`}>
         <div className="sidebar-top">
           <NavLink to="/app" className="sidebar-logo-link" onClick={handleLogoLinkClick}>
-            <img src="/worksparkai.svg" alt="Workspark AI Logo" className="sidebar-logo" />
-            <span className="sidebar-logo-text">Workspark AI</span>
+            <img src="/lyseris.svg" alt="Lyseris AI Logo" className="sidebar-logo" />
+            <span className="sidebar-logo-text">Lyseris AI</span>
           </NavLink>
           
           <button 
@@ -170,7 +170,7 @@ const Sidebar = ({ onOpenSettings, isMobileOpen, onClose, isCollapsed, onToggleC
           >
             {isCollapsed ? (
               <div className="collapse-icon-swap">
-                <img src="/worksparkai.svg" alt="Logo" className="swap-logo" />
+                <img src="/lyseris.svg" alt="Logo" className="swap-logo" />
                 <TbLayoutSidebarRightExpand className="swap-icon" size={20} />
               </div>
             ) : (

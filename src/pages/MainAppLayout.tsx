@@ -11,6 +11,8 @@ import MobileHeader from '../components/MobileHeader';
 import '../css/MobileHeader.css';
 import SubscriptionSuccessOverlay from '../components/SubscriptionSuccessOverlay';
 import '../css/SubscriptionSuccessOverlay.css';
+import api from '../utils/api';
+import { useSettings } from '../contexts/SettingsContext';
 
 const RouteFallback = () => (
   <div style={{
@@ -35,6 +37,7 @@ const MainAppLayout = () => {
   const [showSubOverlay, setShowSubOverlay] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
+  const { loadUser } = useSettings();
 
   useEffect(() => {
     const params = new URLSearchParams(location.search);
@@ -42,8 +45,19 @@ const MainAppLayout = () => {
       setShowSubOverlay(true);
       const cleanPath = location.pathname;
       navigate(cleanPath, { replace: true });
+      const refresh = async () => {
+        try {
+          const res = await api('/stripe/refresh-subscription', { method: 'POST' });
+          if (res.ok) {
+            await loadUser();
+          }
+        } catch (error) {
+          return;
+        }
+      };
+      refresh();
     }
-  }, [location.search, location.pathname, navigate]);
+  }, [location.search, location.pathname, navigate, loadUser]);
 
   return (
     <>

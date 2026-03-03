@@ -1,7 +1,7 @@
 // src/utils/api.ts
 
 export const API_BASE_URL = import.meta.env.VITE_API_URL || 
-  (import.meta.env.DEV ? 'http://localhost:3001' : 'https://worksparkaiserver-215678188656.europe-west1.run.app');
+  (import.meta.env.DEV ? 'http://localhost:3001' : 'https://lyserisaiserver-215678188656.europe-west1.run.app');
 
 /**
  * A wrapper around the native `fetch` function that automatically adds
