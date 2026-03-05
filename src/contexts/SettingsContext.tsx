@@ -140,9 +140,18 @@ export const SettingsProvider = ({ children }: { children: ReactNode }) => {
   useEffect(() => {
     const fetchModelsOnLoad = async () => {
       if (user && user.apiKeys && user.apiKeys.length > 0) {
+        const normalizeProviderId = (providerId = '') => {
+          return String(providerId || '').toLowerCase();
+        };
+
         const provider = user?.selectedProvider;
+        const normalizedProvider = normalizeProviderId(provider);
         
-        if (user.apiKeys.some(k => k.provider === provider && k.key)) {
+        if (user.apiKeys.some((k) => {
+          const rawProvider = String(k.provider || '').toLowerCase();
+          return rawProvider === normalizedProvider && Boolean(k.key);
+        })) {
+
             try {
                 const res = await api('/models', { method: 'POST', body: JSON.stringify({ provider }) });
         if (res.ok) {
