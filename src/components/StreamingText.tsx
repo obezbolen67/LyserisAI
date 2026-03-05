@@ -162,7 +162,7 @@ const StreamingText = memo(({ content, isStreaming, components }: StreamingTextP
     >
       <div className="markdown-body">
         <ReactMarkdown
-          remarkPlugins={[remarkGfm, remarkMath]}
+          remarkPlugins={[remarkGfm, [remarkMath, { singleDollarTextMath: false }]]}
           rehypePlugins={[rehypeKatex]}
           components={components}
         >

@@ -653,7 +653,7 @@ const ChatMessage = ({ message, messages, chatId, index, isEditing, isStreaming,
                 {!isEditing ? (
                   <div className="message-content">
                     {/* Note: Attachments are now rendered above, not inside */}
-                    {message.content && <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]} components={{ code: CustomCode, p: Paragraph }}>{message.content}</ReactMarkdown>}
+                    {message.content && <ReactMarkdown remarkPlugins={[remarkGfm, [remarkMath, { singleDollarTextMath: false }]]} rehypePlugins={[rehypeKatex]} components={{ code: CustomCode, p: Paragraph }}>{message.content}</ReactMarkdown>}
                   </div>
                 ) : (
                   <div className="message-editor-content">
