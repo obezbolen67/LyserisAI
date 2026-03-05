@@ -258,6 +258,17 @@
   border-color: var(--accent-primary);
 }
 
+.model-provider-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-bottom: 0.6rem;
+}
+
+.model-provider-filters .model-filter-toggle {
+  margin-bottom: 0;
+}
+
 /* --- QUICK ACCESS LIST --- */
 .quick-access-list {
   display: flex;

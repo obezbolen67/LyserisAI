@@ -140,6 +140,7 @@ const SettingsModal = ({ isOpen, onClose }: SettingsModalProps) => {
 
   const [modelSearchQuery, setModelSearchQuery] = useState('');
   const [showSelectedOnly, setShowSelectedOnly] = useState(false);
+  const [modelProviderFilters, setModelProviderFilters] = useState<string[]>([]);
   const [gptSection, setGptSection] = useState<GptSection>('general');
   const [showAdvancedProviderSettings, setShowAdvancedProviderSettings] = useState(false);
   const [isGptTreeExpanded, setIsGptTreeExpanded] = useState(true);
@@ -296,6 +297,7 @@ const SettingsModal = ({ isOpen, onClose }: SettingsModalProps) => {
       setIsEditingMaxOutput(false);
       setModelSearchQuery(''); // Reset search on close
       setShowSelectedOnly(false);
+      setModelProviderFilters([]);
       setGptSection('general');
       setShowAdvancedProviderSettings(false);
       setIsGptTreeExpanded(true);
@@ -795,9 +797,20 @@ const SettingsModal = ({ isOpen, onClose }: SettingsModalProps) => {
     const searchFilteredModels = dedupedModelEntries.filter((entry) => (
       entry.id.toLowerCase().includes(modelSearchQuery.toLowerCase())
     ));
-    const filteredModels = showSelectedOnly
-      ? searchFilteredModels.filter((entry) => isModelChecked(entry))
+    const activeProviderFilters = modelProviderFilters.filter((providerId) => enabledProviderIds.includes(providerId));
+    const providerFilteredModels = activeProviderFilters.length > 0
+      ? searchFilteredModels.filter((entry) => activeProviderFilters.includes(entry.provider))
       : searchFilteredModels;
+    const filteredModels = showSelectedOnly
+      ? providerFilteredModels.filter((entry) => isModelChecked(entry))
+      : providerFilteredModels;
+    const emptyModelsMessage = dedupedModelEntries.length === 0
+      ? (isFetching ? 'Loading models...' : 'No models loaded yet. Add an API key and click Refresh.')
+      : providerFilteredModels.length === 0
+        ? 'No models found for selected providers.'
+        : showSelectedOnly && filteredModels.length === 0
+          ? 'No selected models match the current filters.'
+          : 'No models found matching your search.';
     const getApiKeyPlaceholder = () => {
         switch (sectionProviderId) {
             case 'openai': return 'Required: sk-...';
@@ -970,8 +983,6 @@ const SettingsModal = ({ isOpen, onClose }: SettingsModalProps) => {
 
           {isGeneralSection && (
             <>
-              {filteredModels.length > 0 && (
-                <>
                 <div className="form-group">
                   <label>Active Models</label>
                   <p className="description">Models from enabled providers that appear in your chat model list.</p>
@@ -998,6 +1009,52 @@ const SettingsModal = ({ isOpen, onClose }: SettingsModalProps) => {
                   >
                     Show Selected
                   </button>
+
+                  <div className="model-provider-filters">
+                    <button
+                      type="button"
+                      className={`model-filter-toggle ${activeProviderFilters.length === 0 ? 'active' : ''}`}
+                      onClick={() => setModelProviderFilters([])}
+                    >
+                      All Providers
+                    </button>
+                    {enabledProviderIds.map((providerId) => {
+                      const providerLabel = allProviderOptions.find((provider) => provider.id === providerId)?.name || providerId;
+                      const active = activeProviderFilters.includes(providerId);
+                      return (
+                        <button
+                          key={`provider-filter-${providerId}`}
+                          type="button"
+                          className={`model-filter-toggle ${active ? 'active' : ''}`}
+                          onClick={() => {
+                            setModelProviderFilters((prev) => (
+                              prev.includes(providerId)
+                                ? prev.filter((id) => id !== providerId)
+                                : [...prev.filter((id) => enabledProviderIds.includes(id)), providerId]
+                            ));
+                          }}
+                        >
+                          {providerLabel}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  <div className="model-select-wrapper">
+                    <div className="placeholder-selector">
+                      {isFetching ? 'Loading models...' : 'Refresh models for selected provider'}
+                    </div>
+                    <Tooltip text={!currentApiKey ? 'API Key is required' : 'Refresh models'}>
+                      <button
+                        className="refresh-button"
+                        onClick={handleManualFetch}
+                        disabled={isFetching || !currentApiKey}
+                      >
+                        {isFetching ? '...' : <FiRefreshCw size={16} />}
+                      </button>
+                    </Tooltip>
+                  </div>
+
                   <div className="quick-access-list">
                     {filteredModels.map((modelEntry) => {
                         const config = modelConfigs.find((c) => c.id === modelEntry.id && (c.provider || modelEntry.provider) === modelEntry.provider) || { modalities: ['text'] };
@@ -1065,32 +1122,10 @@ const SettingsModal = ({ isOpen, onClose }: SettingsModalProps) => {
                       })}
                   </div>
                   {filteredModels.length === 0 && (
-                    <div className="no-models-found">No models found matching your search.</div>
+                    <div className="no-models-found">{emptyModelsMessage}</div>
                   )}
+                  {fetchError && <p className="error-text">{fetchError}</p>}
                 </div>
-                </>
-              )}
-
-              {filteredModels.length === 0 && (
-                 <div className="form-group">
-                    <label htmlFor="model">Active Models</label>
-                    <div className="model-select-wrapper">
-                        <div className="placeholder-selector">
-                            {isFetching ? 'Loading models...' : 'Select a provider and click Refresh to load models'}
-                        </div>
-                        <Tooltip text={!currentApiKey ? "API Key is required" : "Save credentials & Refresh models" }>
-                            <button 
-                            className="refresh-button" 
-                            onClick={handleManualFetch} 
-                            disabled={isFetching || !currentApiKey}
-                            >
-                            {isFetching ? '...' : <FiRefreshCw size={16} />}
-                            </button>
-                        </Tooltip>
-                    </div>
-                    {fetchError && <p className="error-text">{fetchError}</p>}
-                </div>
-              )}
             </>
           )}
       </div>
