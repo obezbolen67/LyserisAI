@@ -2,7 +2,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import '../css/Sidebar.css';
-import { FiEdit, FiSettings, FiLogOut, FiEdit2, FiTrash, FiX, FiTrash2, FiStar, FiBell } from 'react-icons/fi';
+import { FiEdit, FiSettings, FiLogOut, FiEdit2, FiTrash, FiX, FiTrash2, FiStar, FiBell, FiUser } from 'react-icons/fi';
 import { HiOutlineDotsHorizontal } from 'react-icons/hi';
 import { TbLayoutSidebarLeftCollapse, TbLayoutSidebarRightExpand } from 'react-icons/tb';
 import { useSettings } from '../contexts/SettingsContext';
@@ -17,7 +17,7 @@ import '../css/ConfirmationModal.css';
 import '../css/RenameModal.css';
 
 interface SidebarProps {
-  onOpenSettings: () => void;
+  onOpenSettings: (tab?: 'GPT' | 'Account' | 'Subscription' | 'Appearance' | 'Integrations' | 'Voice') => void;
   isMobileOpen: boolean;
   onClose: () => void;
   isCollapsed: boolean;
@@ -81,7 +81,13 @@ const Sidebar = ({ onOpenSettings, isMobileOpen, onClose, isCollapsed, onToggleC
   }, [isUserMenuOpen, openMenuId]);
   
   const handleSettingsClick = () => {
-    onOpenSettings();
+    onOpenSettings('GPT');
+    setIsUserMenuOpen(false);
+    onClose();
+  };
+
+  const handleAccountClick = () => {
+    onOpenSettings('Account');
     setIsUserMenuOpen(false);
     onClose();
   };
@@ -280,6 +286,10 @@ const Sidebar = ({ onOpenSettings, isMobileOpen, onClose, isCollapsed, onToggleC
                <button className="menu-button" onClick={handleSettingsClick}>
                   <FiSettings size={16} />
                   <span>Settings</span>
+              </button>
+              <button className="menu-button" onClick={handleAccountClick}>
+                  <FiUser size={16} />
+                  <span>Account</span>
               </button>
               <button 
                 className="menu-button destructive" 

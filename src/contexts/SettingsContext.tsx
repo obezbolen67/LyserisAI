@@ -54,6 +54,10 @@ type User = {
   subscriptionId?: string | null;
   subscriptionStatus?: 'active' | 'canceled' | 'incomplete' | 'past_due' | 'unpaid' | null;
   planId?: string | null;
+  creditBalance?: number;
+  creditUsed?: number;
+  creditMonthlyAllowance?: number;
+  creditPeriodEnd?: string | null;
   voiceSettings?: VoiceSettings;
 };
 

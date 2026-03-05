@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useSettings } from '../contexts/SettingsContext';
 import { useNotification } from '../contexts/NotificationContext';
 import '../css/SettingsModal.css';
-import { FiRefreshCw, FiCpu, FiSliders, FiEye, FiEyeOff, FiMoreVertical, FiX, FiCreditCard, FiCheckCircle, FiLink, FiStar, FiVolume2, FiPlay, FiPause, FiChevronDown, FiChevronRight, FiTrash2, FiEdit2 } from "react-icons/fi";
+import { FiRefreshCw, FiCpu, FiSliders, FiEye, FiEyeOff, FiMoreVertical, FiX, FiCheckCircle, FiLink, FiStar, FiVolume2, FiPlay, FiPause, FiChevronDown, FiChevronRight, FiTrash2, FiEdit2, FiUser } from "react-icons/fi";
 import OpenAIIcon from '../icons/openai.svg?react';
 import AnthropicIcon from '../icons/anthropic.svg?react';
 import GeminiIcon from '../icons/gemini.svg?react';
@@ -13,7 +13,14 @@ import Portal from './Portal';
 import { type Provider } from './ProviderSelector';
 import '../css/VoiceSettings.css';
 
-type Model = { id: string };
+type Model = {
+  id: string;
+  architecture?: {
+    modality?: string;
+    input_modalities?: string[];
+    output_modalities?: string[];
+  };
+};
 type ProviderModelEntry = { id: string; provider: string };
 type Modality = 'text' | 'image' | 'code' | 'reasoning';
 type ModelConfig = { id: string; provider?: string; modalities: Modality[]; };
@@ -41,11 +48,14 @@ type VoiceOption = {
   previewText: string;
 };
 
-interface SettingsModalProps { isOpen: boolean; onClose: () => void; }
-type ActiveTab = 'GPT' | 'Subscription' | 'Appearance' | 'Integrations' | 'Voice';
+type ActiveTab = 'GPT' | 'Account' | 'Appearance' | 'Integrations' | 'Voice';
+interface SettingsModalProps { isOpen: boolean; onClose: () => void; initialTab?: ActiveTab; }
+
+const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1';
 
 const providers: Provider[] = [
   { id: 'default', name: "Default (Free)",Icon: GeminiIcon},
+  { id: 'openrouter', name: 'OpenRouter', Icon: OpenAIIcon },
   { id: 'openai', name: 'OpenAI', Icon: OpenAIIcon },
   { id: 'anthropic', name: 'Anthropic', Icon: AnthropicIcon },
   { id: 'gemini', name: 'Gemini', Icon: GeminiIcon },
@@ -101,8 +111,8 @@ const voiceOptions: VoiceOption[] = [
   },
 ];
 
-const SettingsModal = ({ isOpen, onClose }: SettingsModalProps) => {
-  const { user, updateSettings, theme, setTheme } = useSettings();
+const SettingsModal = ({ isOpen, onClose, initialTab = 'GPT' }: SettingsModalProps) => {
+  const { user, updateSettings, theme, setTheme, loadUser } = useSettings();
   const { showNotification } = useNotification();
   const navigate = useNavigate();
   
@@ -132,7 +142,8 @@ const SettingsModal = ({ isOpen, onClose }: SettingsModalProps) => {
   const configMenuRef = useRef<HTMLDivElement | null>(null);
   const closeTimeoutRef = useRef<number | null>(null);
   const previewAudioRef = useRef<HTMLAudioElement | null>(null);
-
+  const hasRefreshedSubscriptionRef = useRef(false);
+  
   const [isEditingContext, setIsEditingContext] = useState(false);
   const [editableContextValue, setEditableContextValue] = useState(String(MIN_CONTEXT));
   const [isEditingMaxOutput, setIsEditingMaxOutput] = useState(false);
@@ -178,7 +189,9 @@ const SettingsModal = ({ isOpen, onClose }: SettingsModalProps) => {
 
     return {
       provider: providerId,
-      baseUrl: providerId === 'openai' ? baseUrl : '',
+      baseUrl: providerId === 'openai'
+        ? baseUrl
+        : (providerId === 'openrouter' ? OPENROUTER_BASE_URL : ''),
       enabled: true,
       contextLength: MIN_CONTEXT,
       maxOutputTokens: 4096,
@@ -191,7 +204,9 @@ const SettingsModal = ({ isOpen, onClose }: SettingsModalProps) => {
     setProviderConfigs((prev) => {
       const existing = prev.find((entry) => entry.provider === providerId) || {
         provider: providerId,
-        baseUrl: providerId === 'openai' ? baseUrl : '',
+        baseUrl: providerId === 'openai'
+          ? baseUrl
+          : (providerId === 'openrouter' ? OPENROUTER_BASE_URL : ''),
         enabled: true,
         contextLength: MIN_CONTEXT,
         maxOutputTokens: 4096,
@@ -265,15 +280,28 @@ const SettingsModal = ({ isOpen, onClose }: SettingsModalProps) => {
         });
       }
 
+      if (!nextProviderConfigs.some((config) => config.provider === 'openrouter')) {
+        nextProviderConfigs.push({
+          provider: 'openrouter',
+          baseUrl: OPENROUTER_BASE_URL,
+          enabled: true,
+          contextLength: user.contextLength || MIN_CONTEXT,
+          maxOutputTokens: user.maxOutputTokens || 4096,
+        });
+      }
+
+      const initialQuickAccessModels = user.quickAccessModels || [];
+      const initialModelConfigs = user.modelConfigs || [];
+
       setSelectedProvider(user.selectedProvider || 'default');
+      setActiveTab(initialTab);
       setApiKeys(user.apiKeys || []);
       setBaseUrl(user.baseUrl || '');
       setProviderConfigs(nextProviderConfigs);
       setSelectedModel(user.selectedModel || '');
-      setProviderModels({});
 
-      setQuickAccessModels(user.quickAccessModels || []);
-      setModelConfigs(user.modelConfigs || []);
+      setQuickAccessModels(initialQuickAccessModels);
+      setModelConfigs(initialModelConfigs);
       setEditableContextValue(String(user.contextLength || MIN_CONTEXT));
       setEditableMaxOutputValue(String(user.maxOutputTokens || 4096));
       setEnabledIntegrations(user.enabledIntegrations || []);
@@ -287,10 +315,11 @@ const SettingsModal = ({ isOpen, onClose }: SettingsModalProps) => {
     }
 
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen]);
+  }, [initialTab, isOpen]);
 
   useEffect(() => {
     if (!isOpen) {
+      hasRefreshedSubscriptionRef.current = false;
       setIsApiKeyVisible(false);
       setOpenConfigMenuId(null);
       setIsEditingContext(false);
@@ -309,6 +338,33 @@ const SettingsModal = ({ isOpen, onClose }: SettingsModalProps) => {
       }
     }
   }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    if (activeTab !== 'Account') return;
+    if (hasRefreshedSubscriptionRef.current) return;
+
+    let cancelled = false;
+    const syncSubscription = async () => {
+      try {
+        const res = await api('/stripe/refresh-subscription', { method: 'POST' });
+        if (cancelled) return;
+        if (res.ok) {
+          await loadUser();
+        }
+      } catch {
+        // Best-effort sync only; no blocking UI error here.
+      } finally {
+        hasRefreshedSubscriptionRef.current = true;
+      }
+    };
+
+    syncSubscription();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, isOpen, loadUser]);
 
   useEffect(() => {
     const handleDocumentClick = (event: MouseEvent) => {
@@ -1058,7 +1114,15 @@ const SettingsModal = ({ isOpen, onClose }: SettingsModalProps) => {
                   <div className="quick-access-list">
                     {filteredModels.map((modelEntry) => {
                         const config = modelConfigs.find((c) => c.id === modelEntry.id && (c.provider || modelEntry.provider) === modelEntry.provider) || { modalities: ['text'] };
-                        const hasImageModality = config.modalities.some(modality => modality === 'image');
+                        const providerModel = (providerModels[modelEntry.provider] || []).find((model) => model.id === modelEntry.id);
+                        const inputModalities = Array.isArray(providerModel?.architecture?.input_modalities)
+                          ? providerModel.architecture.input_modalities.map((value) => String(value || '').toLowerCase())
+                          : [];
+                        const modalitySignature = String(providerModel?.architecture?.modality || '').toLowerCase();
+                        const isOpenRouterModel = modelEntry.provider === 'openrouter';
+                        const hasImageModality = isOpenRouterModel
+                          ? (inputModalities.some((value) => value.includes('image')) || modalitySignature.includes('image'))
+                          : config.modalities.some(modality => modality === 'image');
                         const modelKey = `${modelEntry.provider}:${modelEntry.id}`;
                         const checked = isModelChecked(modelEntry);
                         const providerInfo = allProviderOptions.find((provider) => provider.id === modelEntry.provider);
@@ -1086,37 +1150,39 @@ const SettingsModal = ({ isOpen, onClose }: SettingsModalProps) => {
                             )}
                             <span className="model-name-text">{modelEntry.id}</span>
                           </div>
-                          <div
-                            className="model-config-wrapper"
-                            onClick={(event) => event.stopPropagation()}
-                            onMouseDown={(event) => event.stopPropagation()}
-                          >
-                            <button className="model-config-button" onClick={(e) => handleMenuToggle(modelKey, e)} disabled={!checked}>
-                              <FiMoreVertical size={16}/>
-                            </button>
-                            {openConfigMenuId === modelKey && (
-                              <Portal>
-                                <div
-                                  className="model-config-menu"
-                                  ref={configMenuRef}
-                                  style={{ position: 'absolute', top: `${menuPosition.top}px`, left: `${menuPosition.left}px` }}
-                                  onClick={(event) => event.stopPropagation()}
-                                  onMouseDown={(event) => event.stopPropagation()}
-                                >
-                                  <label className="config-menu-item">
-                                      <input type="checkbox" checked disabled />
-                                      <span>Text</span>
-                                      <span className="modality-dot active"></span>
-                                  </label>
-                                  <label className="config-menu-item">
-                                      <input type="checkbox" checked={hasImageModality} onChange={(e) => handleModalityChange(modelEntry.id, modelEntry.provider, 'image', e.target.checked)} />
-                                      <span>Image</span>
-                                      <span className={`modality-dot ${hasImageModality ? 'active' : ''}`}></span>
-                                  </label>
-                                </div>
-                              </Portal>
-                            )}
-                          </div>
+                          {!isOpenRouterModel && (
+                            <div
+                              className="model-config-wrapper"
+                              onClick={(event) => event.stopPropagation()}
+                              onMouseDown={(event) => event.stopPropagation()}
+                            >
+                              <button className="model-config-button" onClick={(e) => handleMenuToggle(modelKey, e)} disabled={!checked}>
+                                <FiMoreVertical size={16}/>
+                              </button>
+                              {openConfigMenuId === modelKey && (
+                                <Portal>
+                                  <div
+                                    className="model-config-menu"
+                                    ref={configMenuRef}
+                                    style={{ position: 'absolute', top: `${menuPosition.top}px`, left: `${menuPosition.left}px` }}
+                                    onClick={(event) => event.stopPropagation()}
+                                    onMouseDown={(event) => event.stopPropagation()}
+                                  >
+                                    <label className="config-menu-item">
+                                        <input type="checkbox" checked disabled />
+                                        <span>Text</span>
+                                        <span className="modality-dot active"></span>
+                                    </label>
+                                    <label className="config-menu-item">
+                                        <input type="checkbox" checked={hasImageModality} onChange={(e) => handleModalityChange(modelEntry.id, modelEntry.provider, 'image', e.target.checked)} />
+                                        <span>Image</span>
+                                        <span className={`modality-dot ${hasImageModality ? 'active' : ''}`}></span>
+                                    </label>
+                                  </div>
+                                </Portal>
+                              )}
+                            </div>
+                          )}
                         </div>
                         );
                       })}
@@ -1136,23 +1202,6 @@ const SettingsModal = ({ isOpen, onClose }: SettingsModalProps) => {
       </div>
     </>
     );
-  };
-
-  const handleManageSubscription = async () => {
-    try {
-      const res = await api('/stripe/create-portal-session', { method: 'POST' });
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data?.msg || 'Unable to open subscription portal.');
-      }
-      if (data?.url) {
-        window.location.href = data.url;
-        return;
-      }
-      throw new Error('No portal URL returned.');
-    } catch (error) {
-      showNotification(error instanceof Error ? error.message : 'An error occurred.', 'error');
-    }
   };
 
   const renderIntegrationsTab = () => {
@@ -1264,19 +1313,39 @@ const SettingsModal = ({ isOpen, onClose }: SettingsModalProps) => {
     );
   };
 
-  // --- START: New Subscription Handler ---
+  // --- START: Subscription Handler ---
   const handleUpgrade = () => {
     navigate('/app/pricing');
     handleClose(); // Close the modal after navigating
   };
-  // --- END: New Subscription Handler ---
 
-  // --- START: Updated Subscription Tab ---
-  const renderSubscriptionTab = () => {
+  const handleManageSubscription = async () => {
+    try {
+      const res = await api('/stripe/create-portal-session', { method: 'POST' });
+      const data = await res.json();
+      if (data.url) {
+        window.location.href = data.url;
+        return;
+      }
+      throw new Error('No portal URL returned.');
+    } catch (error) {
+      showNotification(error instanceof Error ? error.message : 'An error occurred.', 'error');
+    }
+  };
+  // --- END: Subscription Handler ---
+
+  const renderAccountTab = () => {
     const status = user?.subscriptionStatus;
     const isPro = status === 'active';
     const isCanceled = status === 'canceled';
     const isPaymentIssue = ['past_due', 'unpaid', 'incomplete'].includes(status || '');
+
+    const creditBalance = Math.max(0, Number(user?.creditBalance) || 0);
+    const creditUsed = Math.max(0, Number(user?.creditUsed) || 0);
+    const creditMonthlyAllowance = Math.max(0, Number(user?.creditMonthlyAllowance) || 0);
+    const creditPeriodEndLabel = user?.creditPeriodEnd
+      ? new Date(user.creditPeriodEnd).toLocaleString()
+      : '—';
 
     let planName = 'Free Plan';
     let planFeatures = freeFeatures;
@@ -1326,30 +1395,55 @@ const SettingsModal = ({ isOpen, onClose }: SettingsModalProps) => {
 
     return (
       <>
-        <h3>Subscription</h3>
-        <p>Manage your billing and subscription plan.</p>
-        <div className={`subscription-info-card ${statusClass}`}>
-          <div className="plan-header">
-            <h4>{planName}</h4>
-            <span className={`status-badge ${statusClass}`}>{statusText}</span>
+        <h3>Account</h3>
+        <p>Manage your account, credits, and billing.</p>
+        
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+          {/* Subscription Section */}
+          <div className={`subscription-info-card ${statusClass}`}>
+            <div className="plan-header">
+              <h4>{planName}</h4>
+              <span className={`status-badge ${statusClass}`}>{statusText}</span>
+            </div>
+            <p className="plan-description">{description}</p>
+            <ul className="plan-features-list">
+              {planFeatures.map((feature, index) => (
+                <li key={index}>
+                  <FiCheckCircle size={16} />
+                  <span>{feature}</span>
+                </li>
+              ))}
+            </ul>
+            <div className="plan-actions">
+              {ctaButton}
+            </div>
           </div>
-          <p className="plan-description">{description}</p>
-          <ul className="plan-features-list">
-            {planFeatures.map((feature, index) => (
-              <li key={index}>
+
+          {/* Credits Section */}
+          <div className="subscription-info-card active">
+            <div className="plan-header">
+              <h4>Credits</h4>
+              <span className="status-badge active">{creditBalance.toLocaleString()} available</span>
+            </div>
+            <ul className="plan-features-list">
+              <li>
                 <FiCheckCircle size={16} />
-                <span>{feature}</span>
+                <span>Monthly allowance: {creditMonthlyAllowance.toLocaleString()} credits</span>
               </li>
-            ))}
-          </ul>
-          <div className="plan-actions">
-            {ctaButton}
+              <li>
+                <FiCheckCircle size={16} />
+                <span>Used this period: {creditUsed.toLocaleString()} credits</span>
+              </li>
+              <li>
+                <FiCheckCircle size={16} />
+                <span>Period ends: {creditPeriodEndLabel}</span>
+              </li>
+            </ul>
           </div>
         </div>
       </>
     );
   };
-  // --- END: Updated Subscription Tab ---
 
   const renderAppearanceTab = () => (
     <>
@@ -1527,9 +1621,9 @@ const SettingsModal = ({ isOpen, onClose }: SettingsModalProps) => {
             <FiLink size={18} />
             <span>Integrations</span>
           </button>
-          <button className={`settings-tab-button ${activeTab === 'Subscription' ? 'active' : ''}`} onClick={() => setActiveTab('Subscription')}>
-            <FiCreditCard size={18} />
-            <span>Subscription</span>
+          <button className={`settings-tab-button ${activeTab === 'Account' ? 'active' : ''}`} onClick={() => setActiveTab('Account')}>
+            <FiUser size={18} />
+            <span>Account</span>
           </button>
           <button className={`settings-tab-button ${activeTab === 'Appearance' ? 'active' : ''}`} onClick={() => setActiveTab('Appearance')}>
             <FiSliders size={18} />
@@ -1544,7 +1638,7 @@ const SettingsModal = ({ isOpen, onClose }: SettingsModalProps) => {
           <div key={activeTab === 'GPT' ? `${activeTab}-${gptSection}` : activeTab} className="settings-panel-transition">
             {activeTab === 'GPT' && renderGptTab()}
             {activeTab === 'Integrations' && renderIntegrationsTab()}
-            {activeTab === 'Subscription' && renderSubscriptionTab()}
+            {activeTab === 'Account' && renderAccountTab()}
             {activeTab === 'Appearance' && renderAppearanceTab()}
             {activeTab === 'Voice' && renderVoiceTab()}
           </div>

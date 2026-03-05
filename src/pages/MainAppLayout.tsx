@@ -32,6 +32,7 @@ const RouteFallback = () => (
 
 const MainAppLayout = () => {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [settingsInitialTab, setSettingsInitialTab] = useState<'GPT' | 'Account' | 'Appearance' | 'Integrations' | 'Voice'>('GPT');
   const [isMobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [showSubOverlay, setShowSubOverlay] = useState(false);
@@ -79,7 +80,10 @@ const MainAppLayout = () => {
           />
           <div className="app-container">
             <Sidebar 
-              onOpenSettings={() => setIsSettingsOpen(true)} 
+              onOpenSettings={(tab = 'GPT') => {
+                setSettingsInitialTab(tab as any);
+                setIsSettingsOpen(true);
+              }} 
               isMobileOpen={isMobileSidebarOpen}
               onClose={() => setMobileSidebarOpen(false)}
               isCollapsed={isSidebarCollapsed}
@@ -92,6 +96,7 @@ const MainAppLayout = () => {
           <SettingsModal
             isOpen={isSettingsOpen}
             onClose={() => setIsSettingsOpen(false)}
+            initialTab={settingsInitialTab}
           />
         </SidePanelProvider>
       </ChatProvider>

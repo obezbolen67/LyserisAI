@@ -28,10 +28,12 @@ const PricingPage = () => {
     },
     {
       name: 'Pro',
-      price: '$18',
+      price: '$15',
       priceId: 'price_1S98QdJHhdy0TngLXWUWBrzD',
       features: [
-        'Priority access to high-performance models',
+        '10,000 monthly credits included',
+        'OpenRouter default models (cheap/medium/expensive tiers)',
+        'Transparent credit burn rates by model',
         'Code Interpreter & File Analysis',
         'Web Search capabilities',
         'Bring your own API keys',
