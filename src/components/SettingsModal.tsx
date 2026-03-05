@@ -820,6 +820,126 @@ const SettingsModal = ({ isOpen, onClose, initialTab = 'GPT' }: SettingsModalPro
     }
   };
 
+  const renderGptTree = (className: string) => (
+    <div className={className} aria-label="GPT sections">
+      <button
+        type="button"
+        className={`gpt-sidebar-item ${gptSection === 'general' ? 'active' : ''}`}
+        onClick={() => {
+          setGptSection('general');
+          setShowAdvancedProviderSettings(false);
+        }}
+      >
+        General
+      </button>
+
+      <div className="gpt-sidebar-group-label">Base providers</div>
+      {providers.map((provider) => (
+        <button
+          key={provider.id}
+          type="button"
+          className={`gpt-sidebar-item ${gptSection === `provider:${provider.id}` ? 'active' : ''}`}
+          onClick={() => {
+            setSelectedProvider(provider.id);
+            setGptSection(`provider:${provider.id}`);
+            setShowAdvancedProviderSettings(false);
+          }}
+        >
+          {provider.name}
+        </button>
+      ))}
+
+      <>
+        <div className="gpt-sidebar-group-label-row">
+          <div className="gpt-sidebar-group-label">Custom providers</div>
+          <button
+            type="button"
+            className="gpt-sidebar-group-add"
+            onClick={handleAddProvider}
+            aria-label="Add custom provider"
+          >
+            +
+          </button>
+        </div>
+        {customProviderEntries.length > 0 && (
+          customProviderEntries.map((providerId) => (
+            <div
+              key={providerId}
+              className={`gpt-sidebar-item-row ${gptSection === `provider:${providerId}` ? 'active' : ''} ${editingCustomProviderId === providerId ? 'editing' : ''}`}
+            >
+              {editingCustomProviderId === providerId ? (
+                <input
+                  type="text"
+                  className="gpt-sidebar-rename-input"
+                  value={editableCustomProviderName}
+                  onChange={(event) => setEditableCustomProviderName(event.target.value)}
+                  onBlur={() => handleCommitRenameCustomProvider(providerId)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      event.preventDefault();
+                      handleCommitRenameCustomProvider(providerId);
+                    }
+                    if (event.key === 'Escape') {
+                      event.preventDefault();
+                      handleCancelRenameCustomProvider();
+                    }
+                  }}
+                  autoFocus
+                />
+              ) : (
+                <button
+                  type="button"
+                  className={`gpt-sidebar-item ${gptSection === `provider:${providerId}` ? 'active' : ''}`}
+                  onClick={() => {
+                    setSelectedProvider(providerId);
+                    setGptSection(`provider:${providerId}`);
+                    setShowAdvancedProviderSettings(true);
+                  }}
+                >
+                  {providerId}
+                </button>
+              )}
+
+              <div className="gpt-sidebar-item-actions">
+                <Tooltip text={`Rename ${providerId}`}>
+                  <button
+                    type="button"
+                    className="gpt-sidebar-action gpt-sidebar-rename"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      if (editingCustomProviderId === providerId) {
+                        handleCommitRenameCustomProvider(providerId);
+                        return;
+                      }
+                      handleStartRenameCustomProvider(providerId);
+                    }}
+                    aria-label={`Rename ${providerId}`}
+                  >
+                    <FiEdit2 size={13} />
+                  </button>
+                </Tooltip>
+
+                <Tooltip text={`Delete ${providerId}`}>
+                  <button
+                    type="button"
+                    className="gpt-sidebar-action gpt-sidebar-delete"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      handleDeleteCustomProvider(providerId);
+                    }}
+                    aria-label={`Delete ${providerId}`}
+                  >
+                    <FiTrash2 size={13} />
+                  </button>
+                </Tooltip>
+              </div>
+            </div>
+          ))
+        )}
+      </>
+    </div>
+  );
+
   const renderGptTab = () => {
     const isGeneralSection = gptSection === 'general';
     const sectionProviderId = isGeneralSection ? selectedProvider : gptSection.replace('provider:', '');
@@ -880,6 +1000,9 @@ const SettingsModal = ({ isOpen, onClose, initialTab = 'GPT' }: SettingsModalPro
     <>
       <h3>GPT Settings</h3>
       <p>Configure your connection to a compatible LLM provider.</p>
+      <div className="gpt-mobile-tree-wrapper">
+        {renderGptTree('gpt-mobile-tree')}
+      </div>
       <div className="gpt-section-content">
           {isGeneralSection && isDefaultProviderSelected ? (
             <div className="form-group default-provider-info">
@@ -1112,7 +1235,10 @@ const SettingsModal = ({ isOpen, onClose, initialTab = 'GPT' }: SettingsModalPro
                   </div>
 
                   <div className="quick-access-list">
-                    {filteredModels.map((modelEntry) => {
+                    {filteredModels.length === 0 ? (
+                      <div className="no-models-found">{emptyModelsMessage}</div>
+                    ) : (
+                      filteredModels.map((modelEntry) => {
                         const config = modelConfigs.find((c) => c.id === modelEntry.id && (c.provider || modelEntry.provider) === modelEntry.provider) || { modalities: ['text'] };
                         const providerModel = (providerModels[modelEntry.provider] || []).find((model) => model.id === modelEntry.id);
                         const inputModalities = Array.isArray(providerModel?.architecture?.input_modalities)
@@ -1185,11 +1311,9 @@ const SettingsModal = ({ isOpen, onClose, initialTab = 'GPT' }: SettingsModalPro
                           )}
                         </div>
                         );
-                      })}
+                      })
+                    )}
                   </div>
-                  {filteredModels.length === 0 && (
-                    <div className="no-models-found">{emptyModelsMessage}</div>
-                  )}
                   {fetchError && <p className="error-text">{fetchError}</p>}
                 </div>
             </>
@@ -1497,125 +1621,7 @@ const SettingsModal = ({ isOpen, onClose, initialTab = 'GPT' }: SettingsModalPro
               </button>
             </div>
 
-            {activeTab === 'GPT' && (
-              <div className={`gpt-sidebar-tree ${isGptTreeExpanded ? 'expanded' : 'collapsed'}`} aria-label="GPT sections">
-                <button
-                  type="button"
-                  className={`gpt-sidebar-item ${gptSection === 'general' ? 'active' : ''}`}
-                  onClick={() => {
-                    setGptSection('general');
-                    setShowAdvancedProviderSettings(false);
-                  }}
-                >
-                  General
-                </button>
-
-                <div className="gpt-sidebar-group-label">Base providers</div>
-                {providers.map((provider) => (
-                  <button
-                    key={provider.id}
-                    type="button"
-                    className={`gpt-sidebar-item ${gptSection === `provider:${provider.id}` ? 'active' : ''}`}
-                    onClick={() => {
-                      setSelectedProvider(provider.id);
-                      setGptSection(`provider:${provider.id}`);
-                      setShowAdvancedProviderSettings(false);
-                    }}
-                  >
-                    {provider.name}
-                  </button>
-                ))}
-
-                <>
-                    <div className="gpt-sidebar-group-label-row">
-                      <div className="gpt-sidebar-group-label">Custom providers</div>
-                      <button
-                        type="button"
-                        className="gpt-sidebar-group-add"
-                        onClick={handleAddProvider}
-                        aria-label="Add custom provider"
-                      >
-                        +
-                      </button>
-                    </div>
-                  {customProviderEntries.length > 0 && (
-                    customProviderEntries.map((providerId) => (
-                      <div
-                        key={providerId}
-                        className={`gpt-sidebar-item-row ${gptSection === `provider:${providerId}` ? 'active' : ''} ${editingCustomProviderId === providerId ? 'editing' : ''}`}
-                      >
-                        {editingCustomProviderId === providerId ? (
-                          <input
-                            type="text"
-                            className="gpt-sidebar-rename-input"
-                            value={editableCustomProviderName}
-                            onChange={(event) => setEditableCustomProviderName(event.target.value)}
-                            onBlur={() => handleCommitRenameCustomProvider(providerId)}
-                            onKeyDown={(event) => {
-                              if (event.key === 'Enter') {
-                                event.preventDefault();
-                                handleCommitRenameCustomProvider(providerId);
-                              }
-                              if (event.key === 'Escape') {
-                                event.preventDefault();
-                                handleCancelRenameCustomProvider();
-                              }
-                            }}
-                            autoFocus
-                          />
-                        ) : (
-                          <button
-                            type="button"
-                            className={`gpt-sidebar-item ${gptSection === `provider:${providerId}` ? 'active' : ''}`}
-                            onClick={() => {
-                              setSelectedProvider(providerId);
-                              setGptSection(`provider:${providerId}`);
-                              setShowAdvancedProviderSettings(true);
-                            }}
-                          >
-                            {providerId}
-                          </button>
-                        )}
-
-                        <div className="gpt-sidebar-item-actions">
-                          <Tooltip text={`Rename ${providerId}`}>
-                            <button
-                              type="button"
-                              className="gpt-sidebar-action gpt-sidebar-rename"
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                if (editingCustomProviderId === providerId) {
-                                  handleCommitRenameCustomProvider(providerId);
-                                  return;
-                                }
-                                handleStartRenameCustomProvider(providerId);
-                              }}
-                              aria-label={`Rename ${providerId}`}
-                            >
-                              <FiEdit2 size={13} />
-                            </button>
-                          </Tooltip>
-
-                          <Tooltip text={`Delete ${providerId}`}>
-                            <button
-                              type="button"
-                              className="gpt-sidebar-action gpt-sidebar-delete"
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                handleDeleteCustomProvider(providerId);
-                              }}
-                              aria-label={`Delete ${providerId}`}
-                            >
-                              <FiTrash2 size={13} />
-                            </button>
-                          </Tooltip>
-                        </div>
-                      </div>
-                    ))
-                  )}
-                </>
-              </div>
-            )}
+            {activeTab === 'GPT' && renderGptTree(`gpt-sidebar-tree ${isGptTreeExpanded ? 'expanded' : 'collapsed'}`)}
           </div>
           <button className={`settings-tab-button ${activeTab === 'Integrations' ? 'active' : ''}`} onClick={() => setActiveTab('Integrations')}>
             <FiLink size={18} />
