@@ -123,6 +123,28 @@ const Paragraph: Components['p'] = ({ node, ...props }) => {
     return <p {...props} />;
 };
 
+const MarkdownImageLink = memo(({ src, alt, onView }: { src: string; alt: string; onView: (src: string) => void }) => {
+    const [isTall, setIsTall] = useState(false);
+
+    const handleLoad = useCallback((event: React.SyntheticEvent<HTMLImageElement>) => {
+        const renderedHeight = event.currentTarget.getBoundingClientRect().height;
+        setIsTall(renderedHeight > 50);
+    }, []);
+
+    return (
+        <a
+            href={src}
+            onClick={(e) => {
+                e.preventDefault();
+                onView(src);
+            }}
+            className={`markdown-image-wrapper ${isTall ? 'is-tall' : ''}`}
+        >
+            <img src={src} alt={alt} onLoad={handleLoad} />
+        </a>
+    );
+});
+
 // --- COMPONENT: Local Attachment (Optimistic) with Resizing ---
 const LocalAttachmentImage = memo(({ src, fileName, onView }: { src: string, fileName: string, onView: (s: string) => void }) => {
     const [thumbSrc, setThumbSrc] = useState<string | null>(null);
@@ -297,9 +319,11 @@ const AssistantTurn = memo(({ messages, chatId, startIndex, isStreaming, isThink
         if (!src) return null;
         const resolvedSrc = resolveTurnFileOutputUrl(src);
         return (
-            <a href={resolvedSrc} onClick={(e) => { e.preventDefault(); onView(resolvedSrc); }} className="markdown-image-wrapper">
-                <img src={resolvedSrc} alt={alt || 'image from message'} />
-            </a>
+            <MarkdownImageLink
+                src={resolvedSrc}
+                alt={alt || 'image from message'}
+                onView={onView}
+            />
         );
     };
 
@@ -311,9 +335,11 @@ const AssistantTurn = memo(({ messages, chatId, startIndex, isStreaming, isThink
         const isImage = resolvedHref.match(/\.(jpeg|jpg|gif|png|bmp|webp)($|\?)/i);
         if (isImage) {
             return (
-                <a href={resolvedHref} onClick={(e) => { e.preventDefault(); onView(resolvedHref); }} className="markdown-image-wrapper">
-                    <img src={resolvedHref} alt={String(children) || 'generated image'} />
-                </a>
+                <MarkdownImageLink
+                    src={resolvedHref}
+                    alt={String(children) || 'generated image'}
+                    onView={onView}
+                />
             );
         }
 
