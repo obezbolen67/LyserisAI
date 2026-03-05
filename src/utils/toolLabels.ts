@@ -4,6 +4,7 @@ export const TOOL_DISPLAY_NAMES: Record<string, string> = {
   tool_doc_extract: 'Document Reader',
   tool_geolocation: 'Location Services',
   tool_integration: 'Integration',
+  tool_guide: 'Tool Guide',
   tool_image_search: 'Image Search',
   default: 'Tool'
 };

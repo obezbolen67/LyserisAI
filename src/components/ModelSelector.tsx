@@ -1,15 +1,44 @@
 import { useState, useRef, useEffect } from 'react';
 import { useSettings } from '../contexts/SettingsContext';
-import { FiChevronDown, FiCheck, FiCpu } from 'react-icons/fi';
+import { FiChevronDown, FiCheck } from 'react-icons/fi';
+import OpenAIIcon from '../icons/openai.svg?react';
+import AnthropicIcon from '../icons/anthropic.svg?react';
+import GeminiIcon from '../icons/gemini.svg?react';
 import '../css/ModelSelector.css';
 
+type ActiveModelEntry = {
+  id: string;
+  provider: string;
+};
+
+const providerIconMap: Record<string, React.ComponentType<React.SVGProps<SVGSVGElement>>> = {
+  openai: OpenAIIcon,
+  anthropic: AnthropicIcon,
+  gemini: GeminiIcon,
+  default: GeminiIcon,
+};
+
 const ModelSelector = () => {
-  const { user, models, selectedModel, updateSettings, loading } = useSettings();
+  const { user, selectedModel, updateSettings, loading } = useSettings();
   const [isOpen, setIsOpen] = useState(false);
   const selectorRef = useRef<HTMLDivElement>(null);
 
   const quickAccessModelIds = user?.quickAccessModels || [];
-  const quickAccessModels = models.filter(m => quickAccessModelIds.includes(m.id));
+  const enabledProviders = new Set(
+    (user?.providerConfigs || [])
+      .filter((config) => config.provider !== 'default' && config.enabled !== false)
+      .map((config) => config.provider)
+  );
+
+  const activeModels: ActiveModelEntry[] = quickAccessModelIds
+    .map((modelId) => {
+      const modelConfig = user?.modelConfigs?.find((config) => config.id === modelId);
+      return {
+        id: modelId,
+        provider: modelConfig?.provider || 'openai',
+      };
+    })
+    .filter((entry) => enabledProviders.has(entry.provider));
 
   const handleSelectModel = async (modelId: string, e: React.MouseEvent) => {
     // Prevent event bubbling and default behavior to ensure the action captures
@@ -22,6 +51,12 @@ const ModelSelector = () => {
     setIsOpen(false);
   };
   
+  useEffect(() => {
+    if (!loading && !selectedModel && activeModels.length > 0) {
+      updateSettings({ selectedModel: activeModels[0].id }).catch(() => {});
+    }
+  }, [activeModels, loading, selectedModel, updateSettings]);
+
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (selectorRef.current && !selectorRef.current.contains(event.target as Node)) {
@@ -39,13 +74,6 @@ const ModelSelector = () => {
     return <div className="model-selector-placeholder" />;
   }
 
-  const getModelInfo = () => {
-    return {
-      Icon: FiCpu,
-      description: "",
-    };
-  };
-
   return (
     <div className="model-selector" ref={selectorRef}>
       <button 
@@ -61,22 +89,26 @@ const ModelSelector = () => {
 
       {isOpen && (
         <div className="model-selector-dropdown">
-          {quickAccessModels.length > 0 ? (
-            quickAccessModels.map(model => {
-              const { Icon, description } = getModelInfo();
+          {activeModels.length > 0 ? (
+            activeModels.map((model) => {
+              const ProviderIcon = providerIconMap[model.provider];
               return (
                 <div 
-                  key={model.id}
+                  key={`${model.provider}:${model.id}`}
                   className={`model-item ${selectedModel === model.id ? 'selected' : ''}`}
                   // Use onMouseDown to trigger before blur/focusout events
                   onMouseDown={(e) => handleSelectModel(model.id, e)}
                   role="button"
                   tabIndex={0}
                 >
-                  <Icon size={20} className="model-item-icon" />
+                  {ProviderIcon ? (
+                    <ProviderIcon className="model-item-icon provider-model-icon" />
+                  ) : (
+                    <div className="model-item-icon provider-icon-fallback">{model.provider.charAt(0).toUpperCase()}</div>
+                  )}
                   <div className="model-item-details">
                     <span className="model-item-name">{model.id}</span>
-                    <span className="model-item-description">{description}</span>
+                    <span className="model-item-description">{model.provider}</span>
                   </div>
                   {selectedModel === model.id && <FiCheck size={18} className="model-item-check" />}
                 </div>
@@ -84,7 +116,7 @@ const ModelSelector = () => {
             })
           ) : (
             <div className="model-item-empty">
-              Configure quick access models in Settings.
+              Configure Active Models in Settings.
             </div>
           )}
         </div>

@@ -18,7 +18,7 @@ const PricingPage = () => {
       name: 'Free',
       price: '$0',
       features: [
-        'Standard default model',
+        'Active model list from enabled providers',
         'Code Interpreter & File Analysis',
         'Web Search capabilities',
         'Bring your own API keys',
@@ -31,7 +31,7 @@ const PricingPage = () => {
       price: '$18',
       priceId: 'price_1S98QdJHhdy0TngLXWUWBrzD',
       features: [
-        'Premium default model (GPT-5)',
+        'Priority access to high-performance models',
         'Code Interpreter & File Analysis',
         'Web Search capabilities',
         'Bring your own API keys',

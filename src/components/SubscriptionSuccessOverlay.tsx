@@ -23,7 +23,7 @@ const SubscriptionSuccessOverlay = ({ onClose }: SubscriptionSuccessOverlayProps
           <p className="subtitle">Thanks for upgrading! You now have access to:</p>
           <ul className="feature-list">
             <li>Voice chat included</li>
-            <li>Premium default model (GPT-5)</li>
+            <li>Priority access to high-performance models</li>
             <li>Code Interpreter & File Analysis</li>
             <li>Web Search capabilities</li>
             <li>Bring your own API keys</li>

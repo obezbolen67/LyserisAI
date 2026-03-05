@@ -3,28 +3,42 @@ import { useNavigate } from 'react-router-dom';
 import { useSettings } from '../contexts/SettingsContext';
 import { useNotification } from '../contexts/NotificationContext';
 import '../css/SettingsModal.css';
-import { FiRefreshCw, FiCpu, FiSliders, FiEye, FiEyeOff, FiMoreVertical, FiX, FiCreditCard, FiCheckCircle, FiLink, FiStar, FiVolume2, FiPlay, FiPause } from "react-icons/fi";
+import { FiRefreshCw, FiCpu, FiSliders, FiEye, FiEyeOff, FiMoreVertical, FiX, FiCreditCard, FiCheckCircle, FiLink, FiStar, FiVolume2, FiPlay, FiPause, FiChevronDown, FiChevronRight, FiTrash2, FiEdit2 } from "react-icons/fi";
 import OpenAIIcon from '../icons/openai.svg?react';
 import AnthropicIcon from '../icons/anthropic.svg?react';
 import GeminiIcon from '../icons/gemini.svg?react';
 import api from '../utils/api';
 import Tooltip from './Tooltip';
 import Portal from './Portal';
-import ProviderSelector, { type Provider } from './ProviderSelector';
-import CustomModelSelector from './CustomModelSelector';
-import '../css/ProviderSelector.css';
+import { type Provider } from './ProviderSelector';
 import '../css/VoiceSettings.css';
-import '../css/CustomModelSelector.css';
 
 type Model = { id: string };
+type ProviderModelEntry = { id: string; provider: string };
 type Modality = 'text' | 'image' | 'code' | 'reasoning';
-type ModelConfig = { id: string; modalities: Modality[]; };
+type ModelConfig = { id: string; provider?: string; modalities: Modality[]; };
 type ApiKeyEntry = { provider: string; key: string; };
+type ProviderConfig = {
+  provider: string;
+  baseUrl: string;
+  enabled: boolean;
+  contextLength: number;
+  maxOutputTokens: number;
+};
+type GptSection = 'general' | `provider:${string}`;
 
 type Integration = {
   id: string;
   name: string;
   description: string;
+};
+
+type VoiceOption = {
+  id: string;
+  name: string;
+  description: string;
+  gender: 'male' | 'female';
+  previewText: string;
 };
 
 interface SettingsModalProps { isOpen: boolean; onClose: () => void; }
@@ -36,139 +50,241 @@ const providers: Provider[] = [
   { id: 'anthropic', name: 'Anthropic', Icon: AnthropicIcon },
   { id: 'gemini', name: 'Gemini', Icon: GeminiIcon },
 ];
+const baseProviderIds = new Set(providers.map((provider) => provider.id));
 
 const MIN_CONTEXT = 4096;
 const MAX_CONTEXT = 1000000;
 const MIN_OUTPUT_TOKENS = 256;
 const MAX_OUTPUT_TOKENS = 64000;
 
-// --- START: Added for Subscription Tab ---
-const proFeatures = [
-  'Premium default model (GPT-5)',
-  'Code Interpreter & File Analysis',
-  'Web Search capabilities',
-  'Bring your own API keys',
-  'Voice chat included',
-  'Priority support',
-];
 const freeFeatures = [
-    'Standard default model',
-    'Code Interpreter & File Analysis',
-    'Web Search capabilities',
-    'Bring your own API keys',
-    'Community support'
+  'Unlimited chats with shared free model',
+  'Core chat features',
+  'Basic settings and personalization',
 ];
-// --- END: Added for Subscription Tab ---
+
+const proFeatures = [
+  'Bring-your-own API keys and provider controls',
+  'Voice transcription and text-to-speech',
+  'Tool integrations in chat',
+  'Priority access and higher quality outputs',
+];
+
+const voiceOptions: VoiceOption[] = [
+  {
+    id: '21m00Tcm4TlvDq8ikWAM',
+    name: 'Rachel',
+    description: 'Warm and expressive, great for conversational responses.',
+    gender: 'female',
+    previewText: 'Hi, this is Rachel. I can read your assistant replies aloud.',
+  },
+  {
+    id: 'AZnzlk1XvdvUeBnXmlld',
+    name: 'Domi',
+    description: 'Confident and energetic voice for punchy playback.',
+    gender: 'female',
+    previewText: 'Hello from Domi. Let me read this answer with more punch.',
+  },
+  {
+    id: 'TxGEqnHWrfWFTfGW9XjX',
+    name: 'Josh',
+    description: 'Balanced male voice suited for everyday narration.',
+    gender: 'male',
+    previewText: 'Hey there, I am Josh. This is a quick preview of voice output.',
+  },
+  {
+    id: 'VR6AewLTigWG4xSOukaG',
+    name: 'Arnold',
+    description: 'Deeper, assertive male voice for strong emphasis.',
+    gender: 'male',
+    previewText: 'This is Arnold speaking. Your AI responses can sound like this.',
+  },
+];
 
 const SettingsModal = ({ isOpen, onClose }: SettingsModalProps) => {
-  const { user, models, setModels, updateSettings, theme, setTheme } = useSettings();
+  const { user, updateSettings, theme, setTheme } = useSettings();
   const { showNotification } = useNotification();
   const navigate = useNavigate();
   
   const [activeTab, setActiveTab] = useState<ActiveTab>('GPT');
+  const [isClosing, setIsClosing] = useState(false);
   const [selectedProvider, setSelectedProvider] = useState(user?.selectedProvider || 'default');
   const [apiKeys, setApiKeys] = useState<ApiKeyEntry[]>(user?.apiKeys || []);
   const [baseUrl, setBaseUrl] = useState(user?.baseUrl || '');
+  const [providerConfigs, setProviderConfigs] = useState<ProviderConfig[]>([]);
   const [selectedModel, setSelectedModel] = useState(user?.selectedModel || '');
+  const [isFetching, setIsFetching] = useState(false);
+  const [fetchError, setFetchError] = useState('');
+  const [providerModels, setProviderModels] = useState<Record<string, Model[]>>({});
+  const [isApiKeyVisible, setIsApiKeyVisible] = useState(false);
+  const [openConfigMenuId, setOpenConfigMenuId] = useState<string | null>(null);
+  const [menuPosition, setMenuPosition] = useState({ top: 0, left: 0 });
+
   const [quickAccessModels, setQuickAccessModels] = useState<string[]>(user?.quickAccessModels || []);
   const [availableIntegrations, setAvailableIntegrations] = useState<Integration[]>([]);
   const [enabledIntegrations, setEnabledIntegrations] = useState<string[]>(user?.enabledIntegrations || []);
   const [isLoadingIntegrations, setIsLoadingIntegrations] = useState(false);
   const [modelConfigs, setModelConfigs] = useState<ModelConfig[]>(user?.modelConfigs || []);
-  const [contextLength, setContextLength] = useState(user?.contextLength || MIN_CONTEXT);
-  const [maxOutputTokens, setMaxOutputTokens] = useState(user?.maxOutputTokens || 4096);
-  
-  const [isFetching, setIsFetching] = useState(false);
-  const [fetchError, setFetchError] = useState('');
-  const [isClosing, setIsClosing] = useState(false);
-  const [isApiKeyVisible, setIsApiKeyVisible] = useState(false);
-  const [openConfigMenuId, setOpenConfigMenuId] = useState<string | null>(null);
-  const [menuPosition, setMenuPosition] = useState({ top: 0, left: 0 });
-  const configMenuRef = useRef<HTMLDivElement>(null);
+  const [voiceId, setVoiceId] = useState(user?.voiceSettings?.voiceId || voiceOptions[0].id);
+  const [voiceName, setVoiceName] = useState(user?.voiceSettings?.voiceName || voiceOptions[0].name);
+  const [previewingVoiceId, setPreviewingVoiceId] = useState<string | null>(null);
+
+  const configMenuRef = useRef<HTMLDivElement | null>(null);
+  const closeTimeoutRef = useRef<number | null>(null);
+  const previewAudioRef = useRef<HTMLAudioElement | null>(null);
 
   const [isEditingContext, setIsEditingContext] = useState(false);
-  const [editableContextValue, setEditableContextValue] = useState(String(contextLength));
+  const [editableContextValue, setEditableContextValue] = useState(String(MIN_CONTEXT));
   const [isEditingMaxOutput, setIsEditingMaxOutput] = useState(false);
-  const [editableMaxOutputValue, setEditableMaxOutputValue] = useState(String(maxOutputTokens));
+  const [editableMaxOutputValue, setEditableMaxOutputValue] = useState(String(4096));
 
   const [modelSearchQuery, setModelSearchQuery] = useState('');
-  // --- Voice state ---
-  const curatedVoices = [
-    { id: '9BWtsMINqrJLrRacOk9x', name: 'Aria', gender: 'female' as const, description: 'Warm, conversational' },
-    { id: '21m00Tcm4TlvDq8ikWAM', name: 'Rachel', gender: 'female' as const, description: 'Casual, personable' },
-    { id: '29vD33N1CtxCmqQRPOHJ', name: 'Drew', gender: 'male' as const, description: 'Well-rounded, newsy' },
-    { id: '4YYIPFl9wE5c4L2eu2Gb', name: 'Burt Reynolds™', gender: 'male' as const, description: 'Iconic, deep' },
-  ];
-  const [voiceId, setVoiceId] = useState(user?.voiceSettings?.voiceId || curatedVoices[0].id);
-  const [voiceName, setVoiceName] = useState(user?.voiceSettings?.voiceName || curatedVoices[0].name);
-  const [previewingId, setPreviewingId] = useState<string | null>(null);
-  const audioEl = useRef<HTMLAudioElement | null>(null);
+  const [showSelectedOnly, setShowSelectedOnly] = useState(false);
+  const [gptSection, setGptSection] = useState<GptSection>('general');
+  const [showAdvancedProviderSettings, setShowAdvancedProviderSettings] = useState(false);
+  const [isGptTreeExpanded, setIsGptTreeExpanded] = useState(true);
+  const [editingCustomProviderId, setEditingCustomProviderId] = useState<string | null>(null);
+  const [editableCustomProviderName, setEditableCustomProviderName] = useState('');
 
+  const customProviderEntries = providerConfigs
+    .map((config) => config.provider)
+    .filter((providerId, index, arr) => !baseProviderIds.has(providerId) && arr.indexOf(providerId) === index)
+    .sort();
+
+  const getProviderConfig = useCallback((providerId: string): ProviderConfig => {
+    if (providerId === 'default') {
+      return {
+        provider: 'default',
+        baseUrl: '',
+        enabled: true,
+        contextLength: MIN_CONTEXT,
+        maxOutputTokens: 4096,
+      };
+    }
+
+    const fromState = providerConfigs.find((config) => config.provider === providerId);
+    if (fromState) {
+      return {
+        provider: providerId,
+        baseUrl: fromState.baseUrl || '',
+        enabled: fromState.enabled !== false,
+        contextLength: fromState.contextLength || MIN_CONTEXT,
+        maxOutputTokens: fromState.maxOutputTokens || 4096,
+      };
+    }
+
+    return {
+      provider: providerId,
+      baseUrl: providerId === 'openai' ? baseUrl : '',
+      enabled: true,
+      contextLength: MIN_CONTEXT,
+      maxOutputTokens: 4096,
+    };
+  }, [baseUrl, providerConfigs]);
+
+  const setProviderConfig = useCallback((providerId: string, patch: Partial<ProviderConfig>) => {
+    if (providerId === 'default') return;
+
+    setProviderConfigs((prev) => {
+      const existing = prev.find((entry) => entry.provider === providerId) || {
+        provider: providerId,
+        baseUrl: providerId === 'openai' ? baseUrl : '',
+        enabled: true,
+        contextLength: MIN_CONTEXT,
+        maxOutputTokens: 4096,
+      };
+
+      const next = {
+        ...existing,
+        ...patch,
+        provider: providerId,
+      };
+
+      const withoutCurrent = prev.filter((entry) => entry.provider !== providerId);
+      return [...withoutCurrent, next];
+    });
+  }, [baseUrl]);
+
+  useEffect(() => {
+    const currentConfig = getProviderConfig(selectedProvider);
+    if (selectedProvider === 'openai') {
+      setBaseUrl(currentConfig.baseUrl || '');
+    } else {
+      setBaseUrl('');
+    }
+    setEditableContextValue(String(currentConfig.contextLength || MIN_CONTEXT));
+    setEditableMaxOutputValue(String(currentConfig.maxOutputTokens || 4096));
+  }, [getProviderConfig, selectedProvider]);
 
   useEffect(() => {
     if (!isEditingContext) {
-      setEditableContextValue(String(contextLength));
+      setEditableContextValue(String(MIN_CONTEXT));
     }
-  }, [contextLength, isEditingContext]);
+  }, [isEditingContext]);
 
   useEffect(() => {
     if (!isEditingMaxOutput) {
-      setEditableMaxOutputValue(String(maxOutputTokens));
+      setEditableMaxOutputValue(String(4096));
     }
-  }, [maxOutputTokens, isEditingMaxOutput]);
+  }, [isEditingMaxOutput]);
+
+  useEffect(() => {
+    return () => {
+      if (closeTimeoutRef.current !== null) {
+        window.clearTimeout(closeTimeoutRef.current);
+      }
+      if (previewAudioRef.current) {
+        previewAudioRef.current.pause();
+        previewAudioRef.current = null;
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (isOpen && user) {
+      const nextProviderConfigs = Array.isArray(user.providerConfigs)
+        ? user.providerConfigs.map((config) => ({
+            provider: config.provider,
+            baseUrl: config.baseUrl || '',
+            enabled: config.enabled !== false,
+            contextLength: config.contextLength || MIN_CONTEXT,
+            maxOutputTokens: config.maxOutputTokens || 4096,
+          }))
+        : [];
+
+      if (user.baseUrl && !nextProviderConfigs.some((config) => config.provider === 'openai')) {
+        nextProviderConfigs.push({
+          provider: 'openai',
+          baseUrl: user.baseUrl,
+          enabled: true,
+          contextLength: user.contextLength || MIN_CONTEXT,
+          maxOutputTokens: user.maxOutputTokens || 4096,
+        });
+      }
+
       setSelectedProvider(user.selectedProvider || 'default');
       setApiKeys(user.apiKeys || []);
       setBaseUrl(user.baseUrl || '');
+      setProviderConfigs(nextProviderConfigs);
       setSelectedModel(user.selectedModel || '');
+      setProviderModels({});
+
       setQuickAccessModels(user.quickAccessModels || []);
       setModelConfigs(user.modelConfigs || []);
-      setContextLength(user.contextLength || MIN_CONTEXT);
-      setMaxOutputTokens(user.maxOutputTokens || 4096);
+      setEditableContextValue(String(user.contextLength || MIN_CONTEXT));
+      setEditableMaxOutputValue(String(user.maxOutputTokens || 4096));
       setEnabledIntegrations(user.enabledIntegrations || []);
-      setVoiceId(user.voiceSettings?.voiceId || voiceId);
-      setVoiceName(user.voiceSettings?.voiceName || voiceName);
+      const providerVoiceId = user.voiceSettings?.voiceId || voiceOptions[0].id;
+      const selectedVoice = voiceOptions.find((voice) => voice.id === providerVoiceId);
+      setVoiceId(providerVoiceId);
+      setVoiceName(user.voiceSettings?.voiceName || selectedVoice?.name || '');
+      setGptSection('general');
+      setShowAdvancedProviderSettings(false);
+      setIsGptTreeExpanded(true);
     }
+
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen]); 
-
-  useEffect(() => {
-    if (isOpen) {
-      const fetchIntegrations = async () => {
-        setIsLoadingIntegrations(true);
-        try {
-          const response = await api('/integrations');
-          if (!response.ok) throw new Error('Could not fetch integrations.');
-          const data = await response.json();
-          setAvailableIntegrations(data);
-        } catch (error) {
-          showNotification('Failed to load available integrations.', 'error');
-        } finally {
-          setIsLoadingIntegrations(false);
-        }
-      };
-      fetchIntegrations();
-    }
-  }, [isOpen, showNotification]);
-
-  useEffect(() => {
-    // If we have models loaded and the provider is NOT default (default has implicit models)
-    if (isOpen && models.length > 0 && selectedProvider !== 'default') {
-      const isModelValid = models.some(m => m.id === selectedModel);
-      
-      // If the currently selected model isn't in the new provider's list, clear it or pick a fallback
-      if (!isModelValid && selectedModel !== '') {
-        // Try to keep a selection if it's in quick access, otherwise clear
-        const fallback = quickAccessModels.find(qaId => models.some(m => m.id === qaId));
-        setSelectedModel(fallback || '');
-      }
-    } else if (selectedProvider !== 'default' && models.length === 0 && !isFetching) {
-      // If no models loaded yet for this provider, clear selection to avoid mismatch
-      setSelectedModel('');
-    }
-  }, [selectedProvider, models, isOpen, quickAccessModels]);
+  }, [isOpen]);
 
   useEffect(() => {
     if (!isOpen) {
@@ -177,139 +293,460 @@ const SettingsModal = ({ isOpen, onClose }: SettingsModalProps) => {
       setIsEditingContext(false);
       setIsEditingMaxOutput(false);
       setModelSearchQuery(''); // Reset search on close
+      setShowSelectedOnly(false);
+      setGptSection('general');
+      setShowAdvancedProviderSettings(false);
+      setIsGptTreeExpanded(true);
+      setProviderModels({});
+      setPreviewingVoiceId(null);
+      if (previewAudioRef.current) {
+        previewAudioRef.current.pause();
+        previewAudioRef.current = null;
+      }
     }
   }, [isOpen]);
-  
+
   useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
+    const handleDocumentClick = (event: MouseEvent) => {
       if (configMenuRef.current && !configMenuRef.current.contains(event.target as Node)) {
         setOpenConfigMenuId(null);
       }
     };
+
     if (openConfigMenuId) {
-      document.addEventListener('mousedown', handleClickOutside);
+      document.addEventListener('mousedown', handleDocumentClick);
     }
+
     return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('mousedown', handleDocumentClick);
     };
   }, [openConfigMenuId]);
-  
-  const fetchProviderModels = useCallback(async (provider: string) => {
-    // START CHANGE: Do not fetch for the default provider
-    if (provider === 'default') {
-        setModels([]);
-        return;
-    }
-    // END CHANGE
 
-    const keyForProvider = apiKeys.find(k => k.provider === provider)?.key;
-    if (!keyForProvider) {
-        setModels([]);
-        return;
-    }
+  useEffect(() => {
+    const fetchIntegrations = async () => {
+      if (!isOpen || activeTab !== 'Integrations') return;
+      setIsLoadingIntegrations(true);
+      try {
+        const res = await api('/integrations');
+        if (!res.ok) throw new Error('Failed to load integrations');
+        const data = await res.json();
+        setAvailableIntegrations(Array.isArray(data) ? data : []);
+      } catch {
+        setAvailableIntegrations([]);
+      } finally {
+        setIsLoadingIntegrations(false);
+      }
+    };
 
+    fetchIntegrations();
+  }, [activeTab, isOpen]);
+
+  const handleClose = () => {
+    if (isClosing) return;
+    setIsClosing(true);
+    closeTimeoutRef.current = window.setTimeout(() => {
+      setIsClosing(false);
+      onClose();
+    }, 180);
+  };
+
+  const fetchProviderModels = async (providerId: string) => {
     setIsFetching(true);
     setFetchError('');
     try {
-        const response = await api('/models', { method: 'POST', body: JSON.stringify({ provider }) });
-        const data = await response.json();
-        if (!response.ok) throw new Error(data.error || 'Failed to fetch models.');
-        
-        setModels(data);
-        
-        if (selectedModel && !data.some((m: Model) => m.id === selectedModel)) {
-            setSelectedModel('');
-        }
+      const res = await api('/models', {
+        method: 'POST',
+        body: JSON.stringify({ provider: providerId }),
+      });
+      const payload = await res.json().catch(() => []);
+      if (!res.ok) {
+        throw new Error(payload?.error || payload?.msg || `Failed to fetch ${providerId} models.`);
+      }
+
+      const seen = new Set<string>();
+      const uniqueModels = (Array.isArray(payload) ? payload : []).filter((model: Model) => {
+        if (!model?.id || seen.has(model.id)) return false;
+        seen.add(model.id);
+        return true;
+      });
+      setProviderModels((prev) => ({ ...prev, [providerId]: uniqueModels }));
+      return uniqueModels;
     } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred.';
-        setFetchError(errorMessage);
-        showNotification(errorMessage, 'error');
-        setModels([]);
+      setFetchError(error instanceof Error ? error.message : 'Failed to fetch models.');
+      return [];
     } finally {
-        setIsFetching(false);
+      setIsFetching(false);
     }
-  }, [apiKeys, selectedModel, setModels, showNotification]);
+  };
 
   useEffect(() => {
-    setFetchError('');
-    setModels([]); 
-    
-    fetchProviderModels(selectedProvider);
-  }, [selectedProvider, fetchProviderModels, setModels]);
+    if (!isOpen || activeTab !== 'GPT' || gptSection !== 'general') return;
 
-  const handleApiKeyChange = (newKey: string) => {
-    setApiKeys(prev => {
-      const otherKeys = prev.filter(k => k.provider !== selectedProvider);
-      if (newKey) {
-        return [...otherKeys, { provider: selectedProvider, key: newKey }];
+    const enabledProviderIds = [
+      ...providers.map((provider) => provider.id),
+      ...customProviderEntries,
+    ].filter((providerId) => providerId !== 'default' && getProviderConfig(providerId).enabled !== false);
+
+    const pendingProviderIds = enabledProviderIds.filter((providerId) => {
+      const hasKey = !!apiKeys.find((entry) => entry.provider === providerId)?.key;
+      return hasKey && !providerModels[providerId];
+    });
+
+    if (pendingProviderIds.length === 0) return;
+
+    let cancelled = false;
+    const load = async () => {
+      for (const providerId of pendingProviderIds) {
+        if (cancelled) break;
+        await fetchProviderModels(providerId);
       }
-      return otherKeys;
+    };
+
+    load();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, apiKeys, customProviderEntries, getProviderConfig, gptSection, isOpen, providerModels]);
+
+  const handleApiKeyChange = (providerId: string, value: string) => {
+    setApiKeys((prev) => {
+      const next = [...prev];
+      const existingIndex = next.findIndex((entry) => entry.provider === providerId);
+      if (existingIndex >= 0) {
+        next[existingIndex] = { provider: providerId, key: value };
+      } else {
+        next.push({ provider: providerId, key: value });
+      }
+      return next;
+    });
+    setFetchError('');
+  };
+
+  const handleQuickAccessChange = (entry: ProviderModelEntry) => {
+    setQuickAccessModels((prev) => {
+      const modelConfig = modelConfigs.find((config) => config.id === entry.id);
+      const isEnabled = prev.includes(entry.id) && (modelConfig?.provider || entry.provider) === entry.provider;
+      const next = isEnabled
+        ? prev.filter((id) => id !== entry.id)
+        : [...prev.filter((id) => id !== entry.id), entry.id];
+      if (isEnabled && selectedModel === entry.id) {
+        setSelectedModel('');
+      }
+      return Array.from(new Set(next));
+    });
+
+    setModelConfigs((prev) => {
+      const existing = prev.find((config) => config.id === entry.id);
+      if (existing && existing.provider === entry.provider) {
+        return prev;
+      }
+
+      const withoutCurrent = prev.filter((config) => config.id !== entry.id);
+      return [...withoutCurrent, {
+        id: entry.id,
+        provider: entry.provider,
+        modalities: existing?.modalities && existing.modalities.length > 0 ? existing.modalities : ['text'],
+      }];
     });
   };
-  
-  const handleClose = () => {
-    setIsClosing(true);
-    setTimeout(() => {
-      onClose();
-      setIsClosing(false);
-    }, 300);
+
+  const handleModalityChange = (modelId: string, providerId: string, modality: Modality, enabled: boolean) => {
+    setModelConfigs((prev) => {
+      const existing = prev.find((config) => config.id === modelId && (config.provider || providerId) === providerId)
+        || { id: modelId, provider: providerId, modalities: ['text'] as Modality[] };
+      const currentModalities: Modality[] = Array.isArray(existing.modalities)
+        ? (existing.modalities as Modality[])
+        : ['text'];
+      const baseModalities: Modality[] = currentModalities.includes('text')
+        ? currentModalities
+        : ['text', ...currentModalities];
+      const nextModalities: Modality[] = enabled
+        ? Array.from(new Set([...baseModalities, modality]))
+        : baseModalities.filter((entry) => entry !== modality);
+      const nextConfig = { id: modelId, modalities: nextModalities };
+      const modelProvider = existing.provider || providerId || selectedProvider;
+      const nextConfigWithProvider = { ...nextConfig, provider: modelProvider };
+
+      const withoutCurrent = prev.filter((config) => !(config.id === modelId && (config.provider || providerId) === providerId));
+      return [...withoutCurrent, nextConfigWithProvider];
+    });
+  };
+
+  const handleProviderEnabledChange = (providerId: string, enabled: boolean) => {
+    setProviderConfig(providerId, { enabled });
+
+    if (!enabled) {
+      setQuickAccessModels((prev) => prev.filter((modelId) => {
+        const config = modelConfigs.find((entry) => entry.id === modelId);
+        return (config?.provider || '') !== providerId;
+      }));
+      setModelConfigs((prev) => prev.filter((entry) => (entry.provider || '') !== providerId));
+      if (selectedModel && modelConfigs.find((entry) => entry.id === selectedModel)?.provider === providerId) {
+        setSelectedModel('');
+      }
+    }
+  };
+
+  const handleMenuToggle = (modelId: string, event: React.MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+    if (openConfigMenuId === modelId) {
+      setOpenConfigMenuId(null);
+      return;
+    }
+
+    const buttonRect = event.currentTarget.getBoundingClientRect();
+    setMenuPosition({
+      top: buttonRect.bottom + window.scrollY + 6,
+      left: buttonRect.left + window.scrollX - 80,
+    });
+    setOpenConfigMenuId(modelId);
+  };
+
+  const handleContextInputBlur = (providerId: string) => {
+    const parsed = parseInt(editableContextValue, 10);
+    const fallback = getProviderConfig(providerId).contextLength;
+    const sanitized = Number.isFinite(parsed)
+      ? Math.max(MIN_CONTEXT, Math.min(MAX_CONTEXT, parsed))
+      : fallback;
+    setProviderConfig(providerId, { contextLength: sanitized });
+    setEditableContextValue(String(sanitized));
+    setIsEditingContext(false);
+  };
+
+  const handleContextInputKeyDown = (event: React.KeyboardEvent<HTMLInputElement>, providerId: string) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      handleContextInputBlur(providerId);
+    }
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      setEditableContextValue(String(getProviderConfig(providerId).contextLength));
+      setIsEditingContext(false);
+    }
+  };
+
+  const handleMaxOutputInputBlur = (providerId: string) => {
+    const parsed = parseInt(editableMaxOutputValue, 10);
+    const fallback = getProviderConfig(providerId).maxOutputTokens;
+    const sanitized = Number.isFinite(parsed)
+      ? Math.max(MIN_OUTPUT_TOKENS, Math.min(MAX_OUTPUT_TOKENS, parsed))
+      : fallback;
+    setProviderConfig(providerId, { maxOutputTokens: sanitized });
+    setEditableMaxOutputValue(String(sanitized));
+    setIsEditingMaxOutput(false);
+  };
+
+  const handleMaxOutputInputKeyDown = (event: React.KeyboardEvent<HTMLInputElement>, providerId: string) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      handleMaxOutputInputBlur(providerId);
+    }
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      setEditableMaxOutputValue(String(getProviderConfig(providerId).maxOutputTokens));
+      setIsEditingMaxOutput(false);
+    }
+  };
+
+  const handleIntegrationToggle = (integrationId: string, enabled: boolean) => {
+    if (user?.subscriptionStatus !== 'active') {
+      showNotification('Integrations are available on the Pro plan.', 'error');
+      return;
+    }
+
+    setEnabledIntegrations((prev) => (
+      enabled
+        ? Array.from(new Set([...prev, integrationId]))
+        : prev.filter((id) => id !== integrationId)
+    ));
+  };
+
+  const handleVoicePreview = async (voice: VoiceOption) => {
+    if (previewingVoiceId === voice.id) {
+      if (previewAudioRef.current) {
+        previewAudioRef.current.pause();
+        previewAudioRef.current.currentTime = 0;
+      }
+      setPreviewingVoiceId(null);
+      return;
+    }
+
+    try {
+      setPreviewingVoiceId(voice.id);
+      if (previewAudioRef.current) {
+        previewAudioRef.current.pause();
+      }
+
+      const res = await api('/voice/tts', {
+        method: 'POST',
+        body: JSON.stringify({ text: voice.previewText, voiceId: voice.id }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data?.error || 'Voice preview failed.');
+      }
+
+      const audioBlob = await res.blob();
+      const audioUrl = URL.createObjectURL(audioBlob);
+      const audio = new Audio(audioUrl);
+      previewAudioRef.current = audio;
+      audio.onended = () => {
+        URL.revokeObjectURL(audioUrl);
+        setPreviewingVoiceId(null);
+      };
+      audio.onerror = () => {
+        URL.revokeObjectURL(audioUrl);
+        setPreviewingVoiceId(null);
+      };
+      await audio.play();
+    } catch (error) {
+      setPreviewingVoiceId(null);
+      showNotification(error instanceof Error ? error.message : 'Voice preview failed.', 'error');
+    }
+  };
+
+  const handleAddProvider = () => {
+    const baseName = 'custom-openai';
+    const existingCustomIds = new Set(providerConfigs.map((config) => config.provider));
+    let index = 1;
+    let nextId = `${baseName}-${index}`;
+
+    while (existingCustomIds.has(nextId) || baseProviderIds.has(nextId)) {
+      index += 1;
+      nextId = `${baseName}-${index}`;
+    }
+
+    setProviderConfigs((prev) => ([
+      ...prev,
+      {
+        provider: nextId,
+        baseUrl: '',
+        enabled: true,
+        contextLength: 128000,
+        maxOutputTokens: 4096,
+      },
+    ]));
+
+    setApiKeys((prev) => {
+      if (prev.some((entry) => entry.provider === nextId)) return prev;
+      return [...prev, { provider: nextId, key: '' }];
+    });
+
+    setSelectedProvider(nextId);
+    setGptSection(`provider:${nextId}`);
+    setShowAdvancedProviderSettings(true);
+  };
+
+  const handleDeleteCustomProvider = (providerId: string) => {
+    if (baseProviderIds.has(providerId)) return;
+
+    setProviderConfigs((prev) => prev.filter((config) => config.provider !== providerId));
+    setProviderModels((prev) => {
+      const { [providerId]: _ignored, ...rest } = prev;
+      return rest;
+    });
+    setApiKeys((prev) => prev.filter((entry) => entry.provider !== providerId));
+    setQuickAccessModels((prev) => prev.filter((modelId) => {
+      const config = modelConfigs.find((entry) => entry.id === modelId);
+      return (config?.provider || '') !== providerId;
+    }));
+    setModelConfigs((prev) => prev.filter((entry) => (entry.provider || '') !== providerId));
+    setSelectedProvider((prev) => (prev === providerId ? 'default' : prev));
+    setGptSection((prev) => (prev === `provider:${providerId}` ? 'general' : prev));
+    setShowAdvancedProviderSettings(false);
+    setEditingCustomProviderId((prev) => (prev === providerId ? null : prev));
+    setEditableCustomProviderName('');
+  };
+
+  const handleStartRenameCustomProvider = (providerId: string) => {
+    setEditingCustomProviderId(providerId);
+    setEditableCustomProviderName(providerId);
+  };
+
+  const handleCancelRenameCustomProvider = () => {
+    setEditingCustomProviderId(null);
+    setEditableCustomProviderName('');
+  };
+
+  const handleCommitRenameCustomProvider = (providerId: string) => {
+    const nextProviderId = editableCustomProviderName.trim();
+
+    if (!nextProviderId || nextProviderId === providerId) {
+      handleCancelRenameCustomProvider();
+      return;
+    }
+
+    if (baseProviderIds.has(nextProviderId) || customProviderEntries.includes(nextProviderId)) {
+      showNotification('Provider name already exists. Choose another one.', 'error');
+      return;
+    }
+
+    setProviderConfigs((prev) => prev.map((config) => (
+      config.provider === providerId
+        ? { ...config, provider: nextProviderId }
+        : config
+    )));
+    setApiKeys((prev) => prev.map((entry) => (
+      entry.provider === providerId
+        ? { ...entry, provider: nextProviderId }
+        : entry
+    )));
+    setSelectedProvider((prev) => (prev === providerId ? nextProviderId : prev));
+    setGptSection((prev) => (prev === `provider:${providerId}` ? `provider:${nextProviderId}` : prev));
+    setEditingCustomProviderId(null);
+    setEditableCustomProviderName('');
   };
 
   const handleManualFetch = async () => {
     const currentApiKey = apiKeys.find(k => k.provider === selectedProvider)?.key;
+
     if (!currentApiKey) {
       const providerName = providers.find(p => p.id === selectedProvider)?.name || 'Current provider';
       setFetchError(`${providerName} API Key is required to fetch models.`);
       return;
     }
-    await updateSettings({ apiKeys, baseUrl });
+    await updateSettings({
+      selectedProvider,
+      apiKeys,
+      baseUrl: selectedProvider === 'openai' ? getProviderConfig('openai').baseUrl : '',
+      providerConfigs,
+    });
     await fetchProviderModels(selectedProvider);
   };
 
   const handleSave = async () => {
-    // START CHANGE: Adjust validation for default provider
-    if (selectedProvider !== 'default' && quickAccessModels.length > 0 && !selectedModel) {
-        showNotification('Please select a default model from your Quick Access list.', 'error');
-        return;
-    }
-    // END CHANGE
     try {
-      const configsToSave = modelConfigs.filter(config => quickAccessModels.includes(config.id));
+      const activeModelIds = Array.from(new Set(quickAccessModels.filter((modelId) => {
+        const config = modelConfigs.find((entry) => entry.id === modelId);
+        const modelProvider = config?.provider || selectedProvider;
+        return modelProvider !== 'default' && getProviderConfig(modelProvider).enabled !== false;
+      })));
+      const nextSelectedModel = activeModelIds.includes(selectedModel) ? selectedModel : (activeModelIds[0] || '');
 
-      if (selectedProvider === "default") {
-        configsToSave.push({id: "default", modalities: ["text", "image"]})
-        setModelConfigs(prevConfigs => {
-            const modelConfigIndex = prevConfigs.findIndex(c => c.id === "default");
-
-            if (modelConfigIndex > -1) {
-              prevConfigs[modelConfigIndex] = {id: "default", modalities: ["text", "image"]}
-            } else {
-              prevConfigs.push({id: "default", modalities: ["text", "image"]})
-            }
-            return prevConfigs;
-        })
+      if (!nextSelectedModel) {
+        showNotification('Select at least one Active Model to continue.', 'error');
+        return;
       }
-      
-      // START CHANGE: Only save relevant settings based on provider
+
+      const configsToSave = modelConfigs.filter((config) => activeModelIds.includes(config.id));
+      setSelectedModel(nextSelectedModel);
+
       const settingsToSave = {
         selectedProvider,
         apiKeys,
-        baseUrl: selectedProvider === 'openai' ? baseUrl : '',
+        baseUrl: getProviderConfig('openai').baseUrl || '',
+        providerConfigs,
         modelConfigs: configsToSave,
-        contextLength,
-        maxOutputTokens,
-        selectedModel: selectedProvider === 'default' 
-          ? 'default' 
-          : selectedModel,
-        ...(selectedProvider !== 'default' && {
-          quickAccessModels,
-        }),
+        contextLength: getProviderConfig(selectedProvider).contextLength,
+        maxOutputTokens: getProviderConfig(selectedProvider).maxOutputTokens,
+        selectedModel: nextSelectedModel,
+        quickAccessModels: activeModelIds,
         enabledIntegrations,
         voiceSettings: { voiceId, voiceName },
       };
       
       await updateSettings(settingsToSave);
-      // END CHANGE
 
       showNotification('Settings Saved!');
       handleClose();
@@ -317,264 +754,45 @@ const SettingsModal = ({ isOpen, onClose }: SettingsModalProps) => {
       showNotification(`Failed to save settings.\n${err}`, "error");
     }
   };
-  const previewVoice = async (id: string, name: string) => {
-    setPreviewingId(id);
-    try {
-      // Try local pre-downloaded preview first to avoid API cost
-      const tryLocal = async (): Promise<boolean> => {
-        const exts = ['mp3', 'ogg', 'wav'];
-        for (const ext of exts) {
-          const url = `/voices/${id}.${ext}`;
-          try {
-            const resp = await fetch(url, { method: 'GET' });
-            if (resp.ok) {
-              if (!audioEl.current) audioEl.current = new Audio();
-              audioEl.current.src = `${url}?v=${Date.now()}`; // bust cache during dev
-              await audioEl.current.play();
-              return true;
-            }
-          } catch (_) {
-            // try next extension
-          }
-        }
-        return false;
-      };
-
-      const playedLocal = await tryLocal();
-      if (playedLocal) return;
-
-      // Fallback: call server TTS preview
-      if (!audioEl.current) audioEl.current = new Audio();
-      const res = await api('/voice/tts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Accept: 'audio/mpeg' },
-        body: JSON.stringify({
-          text: `Hi, I am ${name}. This is a sample of my voice.`,
-          voiceId: id,
-        }),
-      });
-      if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err?.error || 'Could not preview voice');
-      }
-      const buf = await res.arrayBuffer();
-      const blob = new Blob([buf], { type: 'audio/mpeg' });
-      const url = URL.createObjectURL(blob);
-      audioEl.current.src = url;
-      await audioEl.current.play();
-    } catch (e) {
-      showNotification(e instanceof Error ? e.message : 'Failed to preview voice', 'error');
-    } finally {
-      setPreviewingId(null);
-    }
-  };
-
-  const renderVoiceTab = () => {
-    const isPro = user?.subscriptionStatus === 'active';
-    return (
-      <>
-        <h3>Voice</h3>
-        <p>Choose how the assistant sounds. Preview each voice and pick your favorite.</p>
-        {!isPro && (
-          <div className="upgrade-prompt">
-            <FiStar size={18} />
-            <span>Voice is a Pro feature.</span>
-            <button onClick={handleUpgrade}>Upgrade to Pro</button>
-          </div>
-        )}
-
-        <div className="voice-grid">
-          {curatedVoices.map(v => (
-            <div key={v.id} className={`voice-card ${voiceId === v.id ? 'selected' : ''}`} onClick={() => { setVoiceId(v.id); setVoiceName(v.name);} }>
-              <div className="voice-card-header">
-                <div className={`voice-gender ${v.gender}`}></div>
-                <h4>{v.name}</h4>
-              </div>
-              <p className="voice-desc">{v.description}</p>
-              <div className="voice-actions">
-                <button className="preview-btn" onClick={(e) => { e.stopPropagation(); previewVoice(v.id, v.name); }} disabled={!isPro || !!previewingId}>
-                  {previewingId === v.id ? <FiPause /> : <FiPlay />} Preview
-                </button>
-                <label className="select-radio">
-                  <input type="radio" checked={voiceId === v.id} onChange={() => { setVoiceId(v.id); setVoiceName(v.name);} } disabled={!isPro} />
-                  <span>Use</span>
-                </label>
-              </div>
-            </div>
-          ))}
-        </div>
-
-        <div className="modal-actions">
-          <button className="modal-button modal-button-cancel" onClick={handleClose}>Cancel</button>
-          <button className="modal-button modal-button-save" onClick={handleSave}>
-            <FiVolume2 style={{marginRight: 8}}/> Save & Close
-          </button>
-        </div>
-      </>
-    );
-  };
-
-  const handleIntegrationToggle = (integrationId: string) => {
-    setEnabledIntegrations(prev =>
-      prev.includes(integrationId)
-        ? prev.filter(id => id !== integrationId)
-        : [...prev, integrationId]
-    );
-  };
-  
-  const handleQuickAccessChange = (modelId: string) => {
-    if (quickAccessModels.includes(modelId)) {
-        if (selectedModel === modelId) {
-            setSelectedModel('');
-        }
-    }
-
-    setQuickAccessModels(prev => 
-      prev.includes(modelId)
-        ? prev.filter(id => id !== modelId)
-        : [...prev, modelId]
-    );
-  };
-  
-  const handleModalityChange = (modelId: string, modalityToToggle: Modality, isEnabled: boolean) => {
-    setModelConfigs(prevConfigs => {
-      const newConfigs = [...prevConfigs];
-      const configIndex = newConfigs.findIndex(c => c.id === modelId);
-
-      if (configIndex > -1) {
-        const configToUpdate = { ...newConfigs[configIndex] };
-        const modalitiesSet = new Set(configToUpdate.modalities);
-        if (isEnabled) modalitiesSet.add(modalityToToggle); else modalitiesSet.delete(modalityToToggle);
-        configToUpdate.modalities = Array.from(modalitiesSet);
-        newConfigs[configIndex] = configToUpdate;
-      } else {
-        const newModalities: Modality[] = ['text'];
-        if (isEnabled) newModalities.push(modalityToToggle);
-        newConfigs.push({ id: modelId, modalities: newModalities });
-      }
-      return newConfigs;
-    });
-  };
-
-  const handleMenuToggle = (modelId: string, event: React.MouseEvent<HTMLButtonElement>) => {
-    if (openConfigMenuId === modelId) {
-      setOpenConfigMenuId(null);
-    } else {
-      const rect = event.currentTarget.getBoundingClientRect();
-      setMenuPosition({ top: rect.bottom + window.scrollY + 5, left: rect.left + window.scrollX });
-      setOpenConfigMenuId(modelId);
-    }
-  };
-
-  const handleProcessAndSetContextValue = () => {
-    let numValue = parseInt(editableContextValue, 10);
-    if (isNaN(numValue)) {
-      numValue = contextLength;
-    }
-    const clampedValue = Math.max(MIN_CONTEXT, Math.min(numValue, MAX_CONTEXT));
-    setContextLength(clampedValue);
-    setIsEditingContext(false);
-  };
-
-  const handleContextInputBlur = () => {
-    handleProcessAndSetContextValue();
-  };
-
-  const handleContextInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter') {
-      handleProcessAndSetContextValue();
-    } else if (e.key === 'Escape') {
-      setEditableContextValue(String(contextLength));
-      setIsEditingContext(false);
-    }
-  };
-
-  const handleProcessAndSetMaxOutput = () => {
-    let numValue = parseInt(editableMaxOutputValue, 10);
-    if (isNaN(numValue)) {
-      numValue = maxOutputTokens;
-    }
-    const clampedValue = Math.max(MIN_OUTPUT_TOKENS, Math.min(numValue, MAX_OUTPUT_TOKENS));
-    setMaxOutputTokens(clampedValue);
-    setIsEditingMaxOutput(false);
-  };
-
-  const handleMaxOutputInputBlur = () => {
-    handleProcessAndSetMaxOutput();
-  };
-
-  const handleMaxOutputInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter') {
-      handleProcessAndSetMaxOutput();
-    } else if (e.key === 'Escape') {
-      setEditableMaxOutputValue(String(maxOutputTokens));
-      setIsEditingMaxOutput(false);
-    }
-  };
-
-  if (!isOpen) return null;
-
-  const renderIntegrationsTab = () => {
-    const isPro = user?.subscriptionStatus === 'active';
-
-    return (
-      <>
-        <h3>Integrations</h3>
-        <p>Connect Lyseris to other services. Available for Pro users.</p>
-        
-        {!isPro && (
-          <div className="upgrade-prompt">
-            <FiStar size={18} />
-            <span>Integrations are a Pro feature.</span>
-            <button onClick={handleUpgrade}>Upgrade to Pro</button>
-          </div>
-        )}
-
-        <div className="integrations-list">
-          {isLoadingIntegrations ? (
-            <p>Loading...</p>
-          ) : availableIntegrations.length > 0 ? (
-            availableIntegrations.map((integration) => (
-              <div key={integration.id} className="integration-card">
-                <div className="integration-info">
-                  <h4>{integration.name}</h4>
-                  <p>{integration.description}</p>
-                </div>
-                <div className="integration-toggle">
-                  <label className="switch">
-                    <input
-                      type="checkbox"
-                      checked={enabledIntegrations.includes(integration.id)}
-                      onChange={() => handleIntegrationToggle(integration.id)}
-                      disabled={!isPro}
-                    />
-                    <span className="slider round"></span>
-                  </label>
-                </div>
-              </div>
-            ))
-          ) : (
-            <p>No integrations are currently available.</p>
-          )}
-        </div>
-
-        <div className="modal-actions">
-          <button className="modal-button modal-button-cancel" onClick={handleClose}>Cancel</button>
-          <button className="modal-button modal-button-save" onClick={handleSave}>Save & Close</button>
-        </div>
-      </>
-    );
-  };
 
   const renderGptTab = () => {
-    const isDefaultProviderSelected = selectedProvider === 'default';
-    const currentApiKey = apiKeys.find(k => k.provider === selectedProvider)?.key || '';
-    const defaultModelOptions = models.filter(model => quickAccessModels.includes(model.id));
-    const filteredModels = models.filter(model => 
-        model.id.toLowerCase().includes(modelSearchQuery.toLowerCase())
-    );
+    const isGeneralSection = gptSection === 'general';
+    const sectionProviderId = isGeneralSection ? selectedProvider : gptSection.replace('provider:', '');
+    const isDefaultProviderSelected = sectionProviderId === 'default';
+    const currentProviderConfig = getProviderConfig(sectionProviderId);
+    const currentApiKey = apiKeys.find((entry) => entry.provider === selectedProvider)?.key || '';
+    const allProviderOptions: Provider[] = [
+      ...providers,
+      ...customProviderEntries.map((providerId) => ({
+        id: providerId,
+        name: providerId,
+      })),
+    ];
+    const enabledProviderIds = allProviderOptions
+      .map((provider) => provider.id)
+      .filter((providerId) => providerId !== 'default' && getProviderConfig(providerId).enabled !== false);
+    const availableModelEntries: ProviderModelEntry[] = enabledProviderIds.flatMap((providerId) => (
+      (providerModels[providerId] || []).map((model) => ({ id: model.id, provider: providerId }))
+    ));
+    const seenEntries = new Set<string>();
+    const dedupedModelEntries = availableModelEntries.filter((entry) => {
+      const key = `${entry.provider}:${entry.id}`;
+      if (seenEntries.has(key)) return false;
+      seenEntries.add(key);
+      return true;
+    });
+    const isModelChecked = (entry: ProviderModelEntry) => {
+      const config = modelConfigs.find((modelConfig) => modelConfig.id === entry.id);
+      return quickAccessModels.includes(entry.id) && (config?.provider || entry.provider) === entry.provider;
+    };
+    const searchFilteredModels = dedupedModelEntries.filter((entry) => (
+      entry.id.toLowerCase().includes(modelSearchQuery.toLowerCase())
+    ));
+    const filteredModels = showSelectedOnly
+      ? searchFilteredModels.filter((entry) => isModelChecked(entry))
+      : searchFilteredModels;
     const getApiKeyPlaceholder = () => {
-        switch (selectedProvider) {
+        switch (sectionProviderId) {
             case 'openai': return 'Required: sk-...';
             case 'anthropic': return 'Required: sk-ant-...';
             case 'gemini': return 'Required: Your Gemini API Key';
@@ -586,252 +804,289 @@ const SettingsModal = ({ isOpen, onClose }: SettingsModalProps) => {
     <>
       <h3>GPT Settings</h3>
       <p>Configure your connection to a compatible LLM provider.</p>
-      
-       <div className="form-group">
-        <label>Provider</label>
-        <ProviderSelector 
-            providers={providers}
-            selectedProvider={selectedProvider}
-            onSelect={(id) => setSelectedProvider(id)}
-        />
-      </div>
+      <div className="gpt-section-content">
+          {isGeneralSection && isDefaultProviderSelected ? (
+            <div className="form-group default-provider-info">
+              <p className="description">
+                You are using free Gemini 2.5 Flash model.
+              </p>
+              <p>
+                Rate limits spread across all users.
+              </p>
+            </div>
+          ) : null}
 
-      {isDefaultProviderSelected ? (
-        <div className="form-group default-provider-info">
-          <p className="description">
-            You are using free Gemini 2.5 Flash model.
-          </p>
-          <p>
-            Rate limits spread across all users.
-          </p>
-        </div>
-      ) : (
-        <>
-          <div className="form-group">
-            <label htmlFor="apiKey">API Key</label>
-            <div className="input-wrapper">
-              <input 
-                id="apiKey" 
-                type={isApiKeyVisible ? 'text' : 'password'}
-                className={!isApiKeyVisible ? 'input-hidden' : ''}
-                value={currentApiKey} 
-                onChange={(e) => handleApiKeyChange(e.target.value)} 
-                placeholder={ getApiKeyPlaceholder() }
-                autoComplete="off"
-              />
-              <Tooltip text={isApiKeyVisible ? "Hide API Key" : "Show API Key"}>
-                <button type="button" className="visibility-toggle-btn" onClick={() => setIsApiKeyVisible(prev => !prev)}>
-                  {isApiKeyVisible ? <FiEyeOff size={18} /> : <FiEye size={18} />}
-                </button>
-              </Tooltip>
-            </div>
-          </div>
-
-          {(selectedProvider === 'openai') && (
-            <div className="form-group">
-              <label htmlFor="baseUrl">Base URL (optional)</label>
-              <input 
-                  id="baseUrl" 
-                  type="text" 
-                  value={baseUrl} 
-                  onChange={(e) => setBaseUrl(e.target.value)} 
-                  placeholder="e.g., https://api.groq.com/openai/v1"
-              />
-            </div>
-          )}
-          
-          <div className="form-group">
-            <div className="label-with-value">
-              <label htmlFor="contextLength">Total Context Length</label>
-              {isEditingContext ? (
-                <input
-                  type="number"
-                  value={editableContextValue}
-                  onChange={(e) => setEditableContextValue(e.target.value)}
-                  onBlur={handleContextInputBlur}
-                  onKeyDown={handleContextInputKeyDown}
-                  className="context-value-input"
-                  autoFocus
-                  onFocus={(e) => e.target.select()}
-                />
-              ) : (
-                <span
-                  onClick={() => setIsEditingContext(true)}
-                  className="context-value-span"
-                >
-                  {contextLength}
-                </span>
-              )}
-            </div>
-            <p className="description">
-              The total token window for the model (input + output). Set this to your selected model's maximum context.
-            </p>
-            <div className="context-slider-group">
-                <input 
-                    type="range" 
-                    id="contextLength"
-                    min={MIN_CONTEXT}
-                    max={MAX_CONTEXT}
-                    step="1024"
-                    value={contextLength}
-                    onChange={(e) => setContextLength(parseInt(e.target.value, 10))}
-                    className="context-slider"
-                />
-            </div>
-          </div>
-
-          <div className="form-group">
-            <div className="label-with-value">
-              <label htmlFor="maxOutputTokens">Max Output Tokens</label>
-              {isEditingMaxOutput ? (
-                <input
-                  type="number"
-                  value={editableMaxOutputValue}
-                  onChange={(e) => setEditableMaxOutputValue(e.target.value)}
-                  onBlur={handleMaxOutputInputBlur}
-                  onKeyDown={handleMaxOutputInputKeyDown}
-                  className="context-value-input"
-                  autoFocus
-                  onFocus={(e) => e.target.select()}
-                />
-              ) : (
-                <span
-                  onClick={() => setIsEditingMaxOutput(true)}
-                  className="context-value-span"
-                >
-                  {maxOutputTokens}
-                </span>
-              )}
-            </div>
-            <p className="description">
-              Controls the maximum tokens the model can generate in one response. This is reserved from the total context length.
-            </p>
-            <div className="context-slider-group">
-                <input 
-                    type="range" 
-                    id="maxOutputTokens"
-                    min={MIN_OUTPUT_TOKENS}
-                    max={MAX_OUTPUT_TOKENS}
-                    step="256"
-                    value={maxOutputTokens}
-                    onChange={(e) => setMaxOutputTokens(parseInt(e.target.value, 10))}
-                    className="context-slider"
-                />
-            </div>
-          </div>
-
-          {models.length > 0 && (
+          {!isGeneralSection && !isDefaultProviderSelected && (
             <>
-            <div className="form-group">
-              <label>Quick Access Models</label>
-              <p className="description">Select which models appear in the top-of-screen selector. Only models selected here can be set as the default.</p>
-              
-              <div className="model-search-wrapper">
-                <input
-                  type="text"
-                  className="model-search-input"
-                  placeholder="Search available models..."
-                  value={modelSearchQuery}
-                  onChange={(e) => setModelSearchQuery(e.target.value)}
-                />
-                <button 
-                    className={`model-search-clear-btn ${modelSearchQuery ? 'visible' : ''}`}
-                    onClick={() => setModelSearchQuery('')}
-                  >
-                    <FiX size={18} />
-                </button>
-              </div>
-              <div className="quick-access-list">
-                {filteredModels.length > 0 ? (
-                  filteredModels.map(model => {
-                    const config = modelConfigs.find(c => c.id === model.id) || { modalities: ['text'] };
-                    const hasImageModality = config.modalities.some(modality => modality === 'image');
-
-                    return (
-                    <div key={model.id} className="quick-access-row">
-                      <label className="quick-access-item">
-                        <input type="checkbox" checked={quickAccessModels.includes(model.id)} onChange={() => handleQuickAccessChange(model.id)} />
-                        <span className="checkbox-visual"></span>
-                        <span className="model-name-text">{model.id}</span>
-                      </label>
-                      <div className="model-config-wrapper">
-                        <button className="model-config-button" onClick={(e) => handleMenuToggle(model.id, e)} disabled={!quickAccessModels.includes(model.id)}>
-                          <FiMoreVertical size={16}/>
-                        </button>
-                        {openConfigMenuId === model.id && (
-                          <Portal>
-                            <div className="model-config-menu" ref={configMenuRef} style={{ position: 'absolute', top: `${menuPosition.top}px`, left: `${menuPosition.left}px` }}>
-                              <label className="config-menu-item">
-                                  <input type="checkbox" checked disabled />
-                                  <span className="checkbox-visual"></span>
-                                  <span>Text</span>
-                              </label>
-                              <label className="config-menu-item">
-                                  <input type="checkbox" checked={hasImageModality} onChange={(e) => handleModalityChange(model.id, 'image', e.target.checked)} />
-                                  <span className="checkbox-visual"></span>
-                                  <span>Image</span>
-                              </label>
-                            </div>
-                          </Portal>
-                        )}
-                      </div>
-                    </div>
-                    );
-                  })
-                ) : (
-                  <div className="no-models-found">
-                    No models found matching your search.
-                  </div>
-                )}
-              </div>
-            </div>
-
-            <div className="form-group">
-                <label htmlFor="model">Default Model</label>
-                <div className="model-select-wrapper">
-                <CustomModelSelector
-                    models={defaultModelOptions}
-                    selectedModel={selectedModel}
-                    onSelect={setSelectedModel}
-                    disabled={defaultModelOptions.length === 0}
-                    placeholderText="Select from Quick Access models"
-                />
-                <Tooltip text={!currentApiKey ? "API Key is required" : "Save credentials & Refresh models" }>
-                    <button 
-                    className="refresh-button" 
-                    onClick={handleManualFetch} 
-                    disabled={isFetching || !currentApiKey}
-                    >
-                    {isFetching ? '...' : <FiRefreshCw size={16} />}
+              <div className="form-group">
+                <label htmlFor="apiKey">API Key</label>
+                <div className="input-wrapper">
+                  <input 
+                    id="apiKey" 
+                    type={isApiKeyVisible ? 'text' : 'password'}
+                    className={!isApiKeyVisible ? 'input-hidden' : ''}
+                    value={apiKeys.find(k => k.provider === sectionProviderId)?.key || ''}
+                    onChange={(e) => handleApiKeyChange(sectionProviderId, e.target.value)} 
+                    placeholder={ getApiKeyPlaceholder() }
+                    autoComplete="off"
+                  />
+                  <Tooltip text={isApiKeyVisible ? "Hide API Key" : "Show API Key"}>
+                    <button type="button" className="visibility-toggle-btn" onClick={() => setIsApiKeyVisible(prev => !prev)}>
+                      {isApiKeyVisible ? <FiEyeOff size={18} /> : <FiEye size={18} />}
                     </button>
-                </Tooltip>
+                  </Tooltip>
                 </div>
-            </div>
+              </div>
+
+              <div className="form-group">
+                <div className="label-with-value">
+                  <label htmlFor="providerEnabled">Enabled</label>
+                </div>
+                <p className="description">Include this provider in the Active Models list.</p>
+                <label className="switch" aria-label={`Enable ${sectionProviderId}`}>
+                  <input
+                    id="providerEnabled"
+                    type="checkbox"
+                    checked={currentProviderConfig.enabled !== false}
+                    onChange={(event) => handleProviderEnabledChange(sectionProviderId, event.target.checked)}
+                  />
+                  <span className="slider" />
+                </label>
+              </div>
+
+              <button
+                type="button"
+                className="provider-advanced-toggle"
+                onClick={() => setShowAdvancedProviderSettings((prev) => !prev)}
+              >
+                {showAdvancedProviderSettings ? 'Hide provider details' : 'Edit provider details'}
+              </button>
+
+              {showAdvancedProviderSettings && (
+                <>
+                  {(sectionProviderId === 'openai' || customProviderEntries.includes(sectionProviderId)) && (
+                    <div className="form-group">
+                      <label htmlFor="baseUrl">Base URL (optional)</label>
+                      <input 
+                          id="baseUrl" 
+                          type="text" 
+                          value={currentProviderConfig.baseUrl} 
+                          onChange={(e) => setProviderConfig(sectionProviderId, { baseUrl: e.target.value })} 
+                          placeholder="e.g., https://api.groq.com/openai/v1"
+                      />
+                    </div>
+                  )}
+                  
+                  <div className="form-group">
+                    <div className="label-with-value">
+                      <label htmlFor="contextLength">Total Context Length</label>
+                      {isEditingContext ? (
+                        <input
+                          type="number"
+                          value={editableContextValue}
+                          onChange={(e) => setEditableContextValue(e.target.value)}
+                          onBlur={() => handleContextInputBlur(sectionProviderId)}
+                          onKeyDown={(e) => handleContextInputKeyDown(e, sectionProviderId)}
+                          className="context-value-input"
+                          autoFocus
+                          onFocus={(e) => e.target.select()}
+                        />
+                      ) : (
+                        <span
+                          onClick={() => setIsEditingContext(true)}
+                          className="context-value-span"
+                        >
+                          {currentProviderConfig.contextLength}
+                        </span>
+                      )}
+                    </div>
+                    <p className="description">
+                      The total token window for the model (input + output). Set this to your selected model's maximum context.
+                    </p>
+                    <div className="context-slider-group">
+                        <input 
+                            type="range" 
+                            id="contextLength"
+                            min={MIN_CONTEXT}
+                            max={MAX_CONTEXT}
+                            step="1024"
+                            value={currentProviderConfig.contextLength}
+                            onChange={(e) => setProviderConfig(sectionProviderId, { contextLength: parseInt(e.target.value, 10) })}
+                            className="context-slider"
+                        />
+                    </div>
+                  </div>
+
+                  <div className="form-group">
+                    <div className="label-with-value">
+                      <label htmlFor="maxOutputTokens">Max Output Tokens</label>
+                      {isEditingMaxOutput ? (
+                        <input
+                          type="number"
+                          value={editableMaxOutputValue}
+                          onChange={(e) => setEditableMaxOutputValue(e.target.value)}
+                          onBlur={() => handleMaxOutputInputBlur(sectionProviderId)}
+                          onKeyDown={(e) => handleMaxOutputInputKeyDown(e, sectionProviderId)}
+                          className="context-value-input"
+                          autoFocus
+                          onFocus={(e) => e.target.select()}
+                        />
+                      ) : (
+                        <span
+                          onClick={() => setIsEditingMaxOutput(true)}
+                          className="context-value-span"
+                        >
+                          {currentProviderConfig.maxOutputTokens}
+                        </span>
+                      )}
+                    </div>
+                    <p className="description">
+                      Controls the maximum tokens the model can generate in one response. This is reserved from the total context length.
+                    </p>
+                    <div className="context-slider-group">
+                        <input 
+                            type="range" 
+                            id="maxOutputTokens"
+                            min={MIN_OUTPUT_TOKENS}
+                            max={MAX_OUTPUT_TOKENS}
+                            step="256"
+                            value={currentProviderConfig.maxOutputTokens}
+                            onChange={(e) => setProviderConfig(sectionProviderId, { maxOutputTokens: parseInt(e.target.value, 10) })}
+                            className="context-slider"
+                        />
+                    </div>
+                  </div>
+                </>
+              )}
             </>
           )}
 
-          {models.length === 0 && (
-             <div className="form-group">
-                <label htmlFor="model">Models</label>
-                <div className="model-select-wrapper">
-                    <div className="placeholder-selector">
-                        {isFetching ? 'Loading models...' : 'Click Refresh to load available models'}
-                    </div>
-                    <Tooltip text={!currentApiKey ? "API Key is required" : "Save credentials & Refresh models" }>
-                        <button 
-                        className="refresh-button" 
-                        onClick={handleManualFetch} 
-                        disabled={isFetching || !currentApiKey}
+          {isGeneralSection && (
+            <>
+              {filteredModels.length > 0 && (
+                <>
+                <div className="form-group">
+                  <label>Active Models</label>
+                  <p className="description">Models from enabled providers that appear in your chat model list.</p>
+                  
+                  <div className="model-search-wrapper">
+                    <input
+                      type="text"
+                      className="model-search-input"
+                      placeholder="Search available models..."
+                      value={modelSearchQuery}
+                      onChange={(e) => setModelSearchQuery(e.target.value)}
+                    />
+                    <button 
+                        className={`model-search-clear-btn ${modelSearchQuery ? 'visible' : ''}`}
+                        onClick={() => setModelSearchQuery('')}
+                      >
+                        <FiX size={18} />
+                    </button>
+                  </div>
+                  <button
+                    type="button"
+                    className={`model-filter-toggle ${showSelectedOnly ? 'active' : ''}`}
+                    onClick={() => setShowSelectedOnly((prev) => !prev)}
+                  >
+                    Show Selected
+                  </button>
+                  <div className="quick-access-list">
+                    {filteredModels.map((modelEntry) => {
+                        const config = modelConfigs.find((c) => c.id === modelEntry.id && (c.provider || modelEntry.provider) === modelEntry.provider) || { modalities: ['text'] };
+                        const hasImageModality = config.modalities.some(modality => modality === 'image');
+                        const modelKey = `${modelEntry.provider}:${modelEntry.id}`;
+                        const checked = isModelChecked(modelEntry);
+                        const providerInfo = allProviderOptions.find((provider) => provider.id === modelEntry.provider);
+                        const ProviderIcon = providerInfo?.Icon;
+
+                        return (
+                        <div
+                          key={modelKey}
+                          className={`quick-access-row ${checked ? 'selected' : ''}`}
+                          onClick={() => handleQuickAccessChange(modelEntry)}
+                          role="button"
+                          tabIndex={0}
+                          onKeyDown={(event) => {
+                            if (event.key === 'Enter' || event.key === ' ') {
+                              event.preventDefault();
+                              handleQuickAccessChange(modelEntry);
+                            }
+                          }}
                         >
-                        {isFetching ? '...' : <FiRefreshCw size={16} />}
-                        </button>
-                    </Tooltip>
+                          <div className="quick-access-item quick-access-item-static">
+                            {ProviderIcon ? (
+                              <ProviderIcon className="provider-model-icon" />
+                            ) : (
+                              <div className="provider-model-icon provider-icon-fallback">{modelEntry.provider.charAt(0).toUpperCase()}</div>
+                            )}
+                            <span className="model-name-text">{modelEntry.id}</span>
+                          </div>
+                          <div
+                            className="model-config-wrapper"
+                            onClick={(event) => event.stopPropagation()}
+                            onMouseDown={(event) => event.stopPropagation()}
+                          >
+                            <button className="model-config-button" onClick={(e) => handleMenuToggle(modelKey, e)} disabled={!checked}>
+                              <FiMoreVertical size={16}/>
+                            </button>
+                            {openConfigMenuId === modelKey && (
+                              <Portal>
+                                <div
+                                  className="model-config-menu"
+                                  ref={configMenuRef}
+                                  style={{ position: 'absolute', top: `${menuPosition.top}px`, left: `${menuPosition.left}px` }}
+                                  onClick={(event) => event.stopPropagation()}
+                                  onMouseDown={(event) => event.stopPropagation()}
+                                >
+                                  <label className="config-menu-item">
+                                      <input type="checkbox" checked disabled />
+                                      <span>Text</span>
+                                      <span className="modality-dot active"></span>
+                                  </label>
+                                  <label className="config-menu-item">
+                                      <input type="checkbox" checked={hasImageModality} onChange={(e) => handleModalityChange(modelEntry.id, modelEntry.provider, 'image', e.target.checked)} />
+                                      <span>Image</span>
+                                      <span className={`modality-dot ${hasImageModality ? 'active' : ''}`}></span>
+                                  </label>
+                                </div>
+                              </Portal>
+                            )}
+                          </div>
+                        </div>
+                        );
+                      })}
+                  </div>
+                  {filteredModels.length === 0 && (
+                    <div className="no-models-found">No models found matching your search.</div>
+                  )}
                 </div>
-                {fetchError && <p className="error-text">{fetchError}</p>}
-            </div>
+                </>
+              )}
+
+              {filteredModels.length === 0 && (
+                 <div className="form-group">
+                    <label htmlFor="model">Active Models</label>
+                    <div className="model-select-wrapper">
+                        <div className="placeholder-selector">
+                            {isFetching ? 'Loading models...' : 'Select a provider and click Refresh to load models'}
+                        </div>
+                        <Tooltip text={!currentApiKey ? "API Key is required" : "Save credentials & Refresh models" }>
+                            <button 
+                            className="refresh-button" 
+                            onClick={handleManualFetch} 
+                            disabled={isFetching || !currentApiKey}
+                            >
+                            {isFetching ? '...' : <FiRefreshCw size={16} />}
+                            </button>
+                        </Tooltip>
+                    </div>
+                    {fetchError && <p className="error-text">{fetchError}</p>}
+                </div>
+              )}
+            </>
           )}
-        </>
-      )}
+      </div>
       
       <div className="modal-actions">
         <button className="modal-button modal-button-cancel" onClick={handleClose}>Cancel</button>
@@ -840,16 +1095,131 @@ const SettingsModal = ({ isOpen, onClose }: SettingsModalProps) => {
     </>
     );
   };
-  
+
   const handleManageSubscription = async () => {
     try {
-      const response = await api('/stripe/create-portal-session', { method: 'POST' });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.msg || 'Could not open management portal.');
-      window.location.href = data.url;
+      const res = await api('/stripe/create-portal-session', { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data?.msg || 'Unable to open subscription portal.');
+      }
+      if (data?.url) {
+        window.location.href = data.url;
+        return;
+      }
+      throw new Error('No portal URL returned.');
     } catch (error) {
       showNotification(error instanceof Error ? error.message : 'An error occurred.', 'error');
     }
+  };
+
+  const renderIntegrationsTab = () => {
+    const canUseIntegrations = user?.subscriptionStatus === 'active';
+
+    return (
+      <>
+        <h3>Integrations</h3>
+        <p>Connect tools the assistant can use while chatting.</p>
+
+        {!canUseIntegrations && (
+          <div className="upgrade-prompt">
+            <FiStar size={16} />
+            <span>Integrations are available on Pro.</span>
+            <button type="button" onClick={handleUpgrade}>Upgrade</button>
+          </div>
+        )}
+
+        {isLoadingIntegrations ? (
+          <p className="description">Loading integrations...</p>
+        ) : (
+          <div className="integrations-list">
+            {availableIntegrations.map((integration) => {
+              const enabled = enabledIntegrations.includes(integration.id);
+              return (
+                <div key={integration.id} className="integration-card">
+                  <div className="integration-info">
+                    <h4>{integration.name}</h4>
+                    <p>{integration.description}</p>
+                  </div>
+
+                  <label className="switch" aria-label={`Enable ${integration.name}`}>
+                    <input
+                      type="checkbox"
+                      checked={enabled}
+                      onChange={(event) => handleIntegrationToggle(integration.id, event.target.checked)}
+                      disabled={!canUseIntegrations}
+                    />
+                    <span className="slider" />
+                  </label>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </>
+    );
+  };
+
+  const renderVoiceTab = () => {
+    const canUseVoice = user?.subscriptionStatus === 'active';
+
+    return (
+      <>
+        <h3>Voice</h3>
+        <p>Choose the voice used for text-to-speech playback.</p>
+
+        {!canUseVoice && (
+          <div className="upgrade-prompt">
+            <FiStar size={16} />
+            <span>Voice features are available on Pro.</span>
+            <button type="button" onClick={handleUpgrade}>Upgrade</button>
+          </div>
+        )}
+
+        <div className="voice-grid">
+          {voiceOptions.map((voice) => {
+            const selected = voiceId === voice.id;
+            const previewing = previewingVoiceId === voice.id;
+
+            return (
+              <div key={voice.id} className={`voice-card ${selected ? 'selected' : ''}`}>
+                <div className="voice-card-header">
+                  <span className={`voice-gender ${voice.gender}`} />
+                  <h4>{voice.name}</h4>
+                </div>
+                <p className="voice-desc">{voice.description}</p>
+
+                <div className="voice-actions">
+                  <button
+                    type="button"
+                    className="preview-btn"
+                    onClick={() => handleVoicePreview(voice)}
+                    disabled={!canUseVoice}
+                  >
+                    {previewing ? <FiPause size={12} /> : <FiPlay size={12} />}
+                    {previewing ? 'Stop' : 'Preview'}
+                  </button>
+
+                  <label className="select-radio">
+                    <input
+                      type="radio"
+                      name="voice-option"
+                      checked={selected}
+                      onChange={() => {
+                        setVoiceId(voice.id);
+                        setVoiceName(voice.name);
+                      }}
+                      disabled={!canUseVoice}
+                    />
+                    Select
+                  </label>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </>
+    );
   };
 
   // --- START: New Subscription Handler ---
@@ -959,15 +1329,158 @@ const SettingsModal = ({ isOpen, onClose }: SettingsModalProps) => {
     </>
   );
 
+  if (!isOpen && !isClosing) {
+    return null;
+  }
+
   return (
     <div className={`modal-overlay ${isClosing ? 'closing' : ''}`} onClick={handleClose}>
       <div className={`modal-content ${isClosing ? 'closing' : ''}`} onClick={(e) => e.stopPropagation()}>
         <aside className="settings-sidebar">
           <h2>Settings</h2>
-          <button className={`settings-tab-button ${activeTab === 'GPT' ? 'active' : ''}`} onClick={() => setActiveTab('GPT')}>
-            <FiCpu size={18} />
-            <span>GPT</span>
-          </button>
+          <div className="gpt-sidebar-block">
+            <div className="settings-tab-button-row">
+              <button className={`settings-tab-button ${activeTab === 'GPT' ? 'active' : ''}`} onClick={() => setActiveTab('GPT')}>
+                <FiCpu size={18} />
+                <span>GPT</span>
+              </button>
+              <button
+                type="button"
+                className={`gpt-tree-toggle ${activeTab === 'GPT' ? 'active' : ''} ${isGptTreeExpanded ? 'expanded' : ''}`}
+                aria-label={isGptTreeExpanded ? 'Collapse GPT sections' : 'Expand GPT sections'}
+                onClick={() => {
+                  if (activeTab !== 'GPT') {
+                    setActiveTab('GPT');
+                    setIsGptTreeExpanded(true);
+                    return;
+                  }
+                  setIsGptTreeExpanded((prev) => !prev);
+                }}
+              >
+                {isGptTreeExpanded ? <FiChevronDown size={14} /> : <FiChevronRight size={14} />}
+              </button>
+            </div>
+
+            {activeTab === 'GPT' && (
+              <div className={`gpt-sidebar-tree ${isGptTreeExpanded ? 'expanded' : 'collapsed'}`} aria-label="GPT sections">
+                <button
+                  type="button"
+                  className={`gpt-sidebar-item ${gptSection === 'general' ? 'active' : ''}`}
+                  onClick={() => {
+                    setGptSection('general');
+                    setShowAdvancedProviderSettings(false);
+                  }}
+                >
+                  General
+                </button>
+
+                <div className="gpt-sidebar-group-label">Base providers</div>
+                {providers.map((provider) => (
+                  <button
+                    key={provider.id}
+                    type="button"
+                    className={`gpt-sidebar-item ${gptSection === `provider:${provider.id}` ? 'active' : ''}`}
+                    onClick={() => {
+                      setSelectedProvider(provider.id);
+                      setGptSection(`provider:${provider.id}`);
+                      setShowAdvancedProviderSettings(false);
+                    }}
+                  >
+                    {provider.name}
+                  </button>
+                ))}
+
+                <>
+                    <div className="gpt-sidebar-group-label-row">
+                      <div className="gpt-sidebar-group-label">Custom providers</div>
+                      <button
+                        type="button"
+                        className="gpt-sidebar-group-add"
+                        onClick={handleAddProvider}
+                        aria-label="Add custom provider"
+                      >
+                        +
+                      </button>
+                    </div>
+                  {customProviderEntries.length > 0 && (
+                    customProviderEntries.map((providerId) => (
+                      <div
+                        key={providerId}
+                        className={`gpt-sidebar-item-row ${gptSection === `provider:${providerId}` ? 'active' : ''} ${editingCustomProviderId === providerId ? 'editing' : ''}`}
+                      >
+                        {editingCustomProviderId === providerId ? (
+                          <input
+                            type="text"
+                            className="gpt-sidebar-rename-input"
+                            value={editableCustomProviderName}
+                            onChange={(event) => setEditableCustomProviderName(event.target.value)}
+                            onBlur={() => handleCommitRenameCustomProvider(providerId)}
+                            onKeyDown={(event) => {
+                              if (event.key === 'Enter') {
+                                event.preventDefault();
+                                handleCommitRenameCustomProvider(providerId);
+                              }
+                              if (event.key === 'Escape') {
+                                event.preventDefault();
+                                handleCancelRenameCustomProvider();
+                              }
+                            }}
+                            autoFocus
+                          />
+                        ) : (
+                          <button
+                            type="button"
+                            className={`gpt-sidebar-item ${gptSection === `provider:${providerId}` ? 'active' : ''}`}
+                            onClick={() => {
+                              setSelectedProvider(providerId);
+                              setGptSection(`provider:${providerId}`);
+                              setShowAdvancedProviderSettings(true);
+                            }}
+                          >
+                            {providerId}
+                          </button>
+                        )}
+
+                        <div className="gpt-sidebar-item-actions">
+                          <Tooltip text={`Rename ${providerId}`}>
+                            <button
+                              type="button"
+                              className="gpt-sidebar-action gpt-sidebar-rename"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                if (editingCustomProviderId === providerId) {
+                                  handleCommitRenameCustomProvider(providerId);
+                                  return;
+                                }
+                                handleStartRenameCustomProvider(providerId);
+                              }}
+                              aria-label={`Rename ${providerId}`}
+                            >
+                              <FiEdit2 size={13} />
+                            </button>
+                          </Tooltip>
+
+                          <Tooltip text={`Delete ${providerId}`}>
+                            <button
+                              type="button"
+                              className="gpt-sidebar-action gpt-sidebar-delete"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                handleDeleteCustomProvider(providerId);
+                              }}
+                              aria-label={`Delete ${providerId}`}
+                            >
+                              <FiTrash2 size={13} />
+                            </button>
+                          </Tooltip>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </>
+              </div>
+            )}
+          </div>
           <button className={`settings-tab-button ${activeTab === 'Integrations' ? 'active' : ''}`} onClick={() => setActiveTab('Integrations')}>
             <FiLink size={18} />
             <span>Integrations</span>
@@ -986,11 +1499,13 @@ const SettingsModal = ({ isOpen, onClose }: SettingsModalProps) => {
           </button>
         </aside>
         <main className="settings-content">
-          {activeTab === 'GPT' && renderGptTab()}
-          {activeTab === 'Integrations' && renderIntegrationsTab()}
-          {activeTab === 'Subscription' && renderSubscriptionTab()}
-          {activeTab === 'Appearance' && renderAppearanceTab()}
-          {activeTab === 'Voice' && renderVoiceTab()}
+          <div key={activeTab === 'GPT' ? `${activeTab}-${gptSection}` : activeTab} className="settings-panel-transition">
+            {activeTab === 'GPT' && renderGptTab()}
+            {activeTab === 'Integrations' && renderIntegrationsTab()}
+            {activeTab === 'Subscription' && renderSubscriptionTab()}
+            {activeTab === 'Appearance' && renderAppearanceTab()}
+            {activeTab === 'Voice' && renderVoiceTab()}
+          </div>
         </main>
       </div>
     </div>

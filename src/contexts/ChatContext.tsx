@@ -181,13 +181,12 @@ export const ChatProvider = ({ children }: { children: ReactNode }) => {
       let assistantMessageIndex = -1;
       let streamEndedForClientTool = false;
 
-      // Helper for client-side scheduling inside the stream scope
       const executeClientSchedule = async (tool_id: string, tool_name: string, args: any) => {
         const { task, description, datetime_from } = args;
         const scheduleDate = new Date(datetime_from);
-        
+
         const result = await scheduleClientNotification(task, description, scheduleDate);
-        
+
         let resultContent = '';
         let state: Message['state'] = 'completed';
 
@@ -271,30 +270,26 @@ export const ChatProvider = ({ children }: { children: ReactNode }) => {
                 }
 
                 switch (event.type) {
-                  // --- 1. TOOL CREATION & UPDATES (Consolidated) ---
                   case 'TOOL_CODE_CREATE':
                   case 'TOOL_SEARCH_CREATE':
                   case 'TOOL_DOC_EXTRACT_CREATE':
                   case 'TOOL_GEOLOCATION_CREATE':
+                  case 'TOOL_GUIDE_CREATE':
                   case 'TOOL_INTEGRATION_CREATE':
                   case 'TOOL_SCHEDULE_CREATE':
                     if (event.message && event.message.isClientSideTool) {
                         streamEndedForClientTool = true;
                     }
                     
-                    // Force render immediately to ensure UI reflects state before stream might close
                     flushSync(() => {
                       setMessages((prev) => {
                         const newMessages = [...prev];
                         
-                        // Check if we already have this tool (by ID) to prevent duplicates
                         const existingIndex = newMessages.findIndex(m => m.tool_id === event.message.tool_id);
                         
                         if (existingIndex !== -1) {
-                            // Update existing tool message
                             newMessages[existingIndex] = event.message;
                         } else {
-                            // Otherwise replace waiting placeholder or append
                             const lastMessage = newMessages[newMessages.length - 1];
                             if (lastMessage?.isWaiting) {
                               newMessages[newMessages.length - 1] = event.message;
@@ -306,7 +301,6 @@ export const ChatProvider = ({ children }: { children: ReactNode }) => {
                       });
                     });
 
-                    // Handle client-side scheduler immediately
                     if (event.type === 'TOOL_SCHEDULE_CREATE' && event.message.tool_arguments) {
                         executeClientSchedule(
                             event.message.tool_id,
@@ -316,7 +310,6 @@ export const ChatProvider = ({ children }: { children: ReactNode }) => {
                     }
                     break;
 
-                  // --- 2. THINKING EVENTS ---
                   case 'THINKING_START':
                     setIsThinking(true);
                     setThinkingContent('');
@@ -364,7 +357,6 @@ export const ChatProvider = ({ children }: { children: ReactNode }) => {
                     setIsThinking(false);
                     break;
 
-                  // --- 3. ASSISTANT TEXT ---
                   case 'ASSISTANT_START':
                     setMessages((prev) => {
                       const newMessages = [...prev];
@@ -421,10 +413,11 @@ export const ChatProvider = ({ children }: { children: ReactNode }) => {
                   case 'ASSISTANT_COMPLETE':
                     break;
 
-                  // --- 4. TOOL STATUS UPDATES & DELTAS ---
                   case 'TOOL_CODE_DELTA':
                   case 'TOOL_SEARCH_DELTA':
                   case 'TOOL_DOC_EXTRACT_DELTA':
+                  case 'TOOL_GEOLOCATION_DELTA':
+                  case 'TOOL_GUIDE_DELTA':
                   case 'TOOL_INTEGRATION_DELTA':
                     flushSync(() => {
                       setMessages((prev) => {
@@ -444,6 +437,8 @@ export const ChatProvider = ({ children }: { children: ReactNode }) => {
                   case 'TOOL_CODE_COMPLETE':
                   case 'TOOL_SEARCH_COMPLETE':
                   case 'TOOL_DOC_EXTRACT_COMPLETE':
+                  case 'TOOL_GEOLOCATION_COMPLETE':
+                  case 'TOOL_GUIDE_COMPLETE':
                   case 'TOOL_INTEGRATION_COMPLETE':
                     setMessages((prev) => {
                       const newMessages = [...prev];
@@ -456,6 +451,8 @@ export const ChatProvider = ({ children }: { children: ReactNode }) => {
                   case 'TOOL_CODE_STATE_UPDATE':
                   case 'TOOL_SEARCH_STATE_UPDATE':
                   case 'TOOL_DOC_EXTRACT_STATE_UPDATE':
+                  case 'TOOL_GEOLOCATION_STATE_UPDATE':
+                  case 'TOOL_GUIDE_STATE_UPDATE':
                   case 'TOOL_INTEGRATION_STATE_UPDATE':
                     setMessages((prev) => {
                       const newMessages = [...prev];
@@ -468,24 +465,26 @@ export const ChatProvider = ({ children }: { children: ReactNode }) => {
                   case 'TOOL_CODE_RESULT':
                   case 'TOOL_SEARCH_RESULT':
                   case 'TOOL_DOC_EXTRACT_RESULT':
+                  case 'TOOL_GEOLOCATION_RESULT':
+                  case 'TOOL_GUIDE_RESULT':
                   case 'TOOL_INTEGRATION_RESULT':
                     setMessages((prev) => {
-                        const newMessages = [...prev];
-                        const toolReqRole = event.type.replace('_RESULT', '').toLowerCase();
-                        const toolIndex = newMessages.findIndex(
-                            (m) => m.role === toolReqRole && m.tool_id === event.tool_id
-                        );
-                        if (toolIndex !== -1) newMessages[toolIndex].state = event.state;
-                        
-                        const resultRole = (toolReqRole + '_result') as Message['role'];
-                        newMessages.push({
-                            role: resultRole,
-                            content: event.result.content,
-                            tool_id: event.tool_id,
-                            fileOutputs: event.result.fileOutputs || undefined,
-                            integrationData: event.result.integrationData || undefined,
-                        });
-                        return newMessages;
+                      const newMessages = [...prev];
+                      const toolReqRole = event.type.replace('_RESULT', '').toLowerCase();
+                      const toolIndex = newMessages.findIndex(
+                        (m) => m.role === toolReqRole && m.tool_id === event.tool_id
+                      );
+                      if (toolIndex !== -1) newMessages[toolIndex].state = event.state;
+
+                      const resultRole = (toolReqRole + '_result') as Message['role'];
+                      newMessages.push({
+                        role: resultRole,
+                        content: event.result.content,
+                        tool_id: event.tool_id,
+                        fileOutputs: event.result.fileOutputs || undefined,
+                        integrationData: event.result.integrationData || undefined,
+                      });
+                      return newMessages;
                     });
                     assistantMessageIndex = -1;
                     currentAssistantThinking = '';
@@ -495,6 +494,7 @@ export const ChatProvider = ({ children }: { children: ReactNode }) => {
                 throw error;
               }
             }
+
             boundary = buffer.indexOf('\n\n');
           }
         }
@@ -506,18 +506,15 @@ export const ChatProvider = ({ children }: { children: ReactNode }) => {
         }
       } finally {
         if (streamEndedForClientTool) {
-          // Just stop the loading spinner, DO NOT remove the last message
           setIsStreaming(false);
           streamAbortControllerRef.current = null;
         } else {
-          // Standard cleanup (removes placeholders)
           stopGeneration();
         }
       }
     },
     [stopGeneration, showNotification]
   );
-
 
   const sendMessage = async (text: string, attachments: Attachment[] = [], metadata?: Record<string, any>) => {
     if (isStreaming || isSending) return;

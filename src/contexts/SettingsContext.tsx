@@ -10,6 +10,7 @@ type Modality = 'text' | 'image' | 'code' | 'reasoning';
 
 type ModelConfig = {
   id: string;
+  provider?: string;
   modalities: Modality[];
 };
 
@@ -27,6 +28,14 @@ type ApiKeyEntry = {
   key: string;
 };
 
+type ProviderConfig = {
+  provider: string;
+  baseUrl?: string;
+  enabled?: boolean;
+  contextLength?: number;
+  maxOutputTokens?: number;
+};
+
 type User = {
   _id: string;
   email: string;
@@ -37,6 +46,7 @@ type User = {
   theme: Theme;
   quickAccessModels?: string[];
   modelConfigs?: ModelConfig[];
+  providerConfigs?: ProviderConfig[];
   enabledIntegrations?: string[];
   contextLength?: number;
   maxOutputTokens?: number;

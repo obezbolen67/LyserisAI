@@ -1,31 +1,31 @@
 // src/components/VoiceChatModal.tsx
-import { useState, useEffect, useRef, useCallback } from 'react';
-import { FiX, FiAlertTriangle } from 'react-icons/fi';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { FiX, FiAlertTriangle, FiSearch, FiCode, FiFileText, FiMapPin, FiCompass } from 'react-icons/fi';
 import { useChat } from '../contexts/ChatContext';
 import { useSettings } from '../contexts/SettingsContext';
 import { useNotification } from '../contexts/NotificationContext';
 import { API_BASE_URL } from '../utils/api';
 import '../css/VoiceChatModal.css';
 import Portal from './Portal';
-import type { Message } from '../types';
-import CodeAnalysisBlock from './CodeAnalysisBlock';
-import SearchBlock from './SearchBlock';
-import AnalysisBlock from './AnalysisBlock';
-import GeolocationBlock from './GeolocationBlock';
-import GeolocationRequestBlock from './GeolocationRequestBlock';
-import GoogleMapsBlock from './GoogleMapsBlock';
-import ImageViewer from './ImageViewer';
+import { getToolDisplayName } from '../utils/toolLabels';
 
 interface VoiceChatModalProps {
   isOpen: boolean;
   onClose: () => void;
 }
 
-const SPEECH_START_THRESHOLD = 0.19; // Start speaking when above this RMS
-const SPEECH_STOP_THRESHOLD = 0.15; // Consider silence only when below this RMS (hysteresis)
-const SILENCE_DURATION_MS = 2800; // Longer hangover to avoid early cutoff
+const SPEECH_START_THRESHOLD = 0.004; // Start speaking when above this RMS
+const SPEECH_STOP_THRESHOLD = 0.0025; // Consider silence only when below this RMS (hysteresis)
+const SILENCE_DURATION_MS = 2000; // Allow short pauses while user is thinking between words
 const MIN_RECORDING_MS = 1100; // Require a bit longer minimum capture
-const MIN_AUDIO_BYTES = 2000; // Minimum audio size to send
+const MIN_AUDIO_BYTES = 1200; // Minimum audio size to send
+const MIN_SILENT_FRAMES_TO_STOP = 5; // Require sustained silence (prevents threshold jitter flicker)
+const MIN_VOICED_FRAMES_TO_START = 4; // Require sustained speech before entering speaking state
+const MIN_POST_SPEECH_SILENT_FRAMES_TO_STOP = 120; // Primary turn-end trigger after speech is detected (~2s at 60fps)
+const NO_SPEECH_TIMEOUT_MS = 3500; // If speech never starts, stop and wait for next turn
+const MAX_RECORDING_MS = 18000; // Hard cap to avoid runaway recordings in noisy environments
+const MAX_POST_SPEECH_SILENCE_MS = 2600; // Absolute silence cap once speech has been detected
+const DEBUG_VOICE_VAD = true;
 
 const VoiceChatModal = ({ isOpen, onClose }: VoiceChatModalProps) => {
   const [isListening, setIsListening] = useState(false);
@@ -34,7 +34,24 @@ const VoiceChatModal = ({ isOpen, onClose }: VoiceChatModalProps) => {
   const [isRecording, setIsRecording] = useState(false);
   const [isThinking, setIsThinking] = useState(false); // UI hint while waiting for assistant
   const [voiceError, setVoiceError] = useState<string | null>(null);
-  const { sendMessage, messages, isStreaming, activeChatId } = useChat();
+  const [debugInfo, setDebugInfo] = useState({
+    instantRms: 0,
+    smoothedRms: 0,
+    adaptiveStartThreshold: SPEECH_START_THRESHOLD,
+    adaptiveStopThreshold: SPEECH_STOP_THRESHOLD,
+    noiseFloor: 0,
+    silentFrames: 0,
+    voicedFrames: 0,
+    speechActiveFrames: 0,
+    recordingDurationMs: 0,
+    silenceDurationMs: 0,
+    lastBlobSize: 0,
+    lastTranscriptLength: 0,
+    hasDetectedSpeech: false,
+    stopReason: 'none',
+  });
+  const [debugEvents, setDebugEvents] = useState<string[]>([]);
+  const { sendMessage, messages, isStreaming } = useChat();
   const { user } = useSettings();
   const { showNotification } = useNotification();
 
@@ -75,12 +92,32 @@ const VoiceChatModal = ({ isOpen, onClose }: VoiceChatModalProps) => {
   const recordingStartTimeRef = useRef<number>(0);
   const lastSoundTimeRef = useRef<number>(0);
   const smoothedRmsRef = useRef<number>(0);
-  const [viewerSrc, setViewerSrc] = useState<string | null>(null);
-  const [isViewerOpen, setIsViewerOpen] = useState(false);
+  const silentFramesRef = useRef<number>(0);
+  const voicedFramesRef = useRef<number>(0);
+  const speechActiveFramesRef = useRef<number>(0);
+  const hasDetectedSpeechRef = useRef<boolean>(false);
+  const noiseFloorRef = useRef<number>(0.003);
+  const lastDebugUiUpdateRef = useRef<number>(0);
+  const lastDebugConsoleLogRef = useRef<number>(0);
+  const noTranscriptCooldownUntilRef = useRef<number>(0);
+  const isTranscribingRef = useRef<boolean>(false);
+  const pushDebugEvent = useCallback((event: string, payload?: Record<string, unknown>) => {
+    if (!DEBUG_VOICE_VAD) return;
+    const ts = new Date().toISOString().slice(11, 23);
+    const payloadStr = payload ? ` ${JSON.stringify(payload)}` : '';
+    const line = `${ts} ${event}${payloadStr}`;
 
-  const handleOpenViewer = useCallback((src: string) => {
-    setViewerSrc(src);
-    setIsViewerOpen(true);
+    setDebugEvents((prev) => [line, ...prev].slice(0, 16));
+
+    try {
+      console.warn('[VOICE][VAD]', event, payload || {});
+    } catch (_) {}
+
+    try {
+      const w = window as unknown as { __LYS_VOICE_DEBUG?: string[] };
+      const existing = Array.isArray(w.__LYS_VOICE_DEBUG) ? w.__LYS_VOICE_DEBUG : [];
+      w.__LYS_VOICE_DEBUG = [line, ...existing].slice(0, 100);
+    } catch (_) {}
   }, []);
 
   const cleanupResources = useCallback(() => {
@@ -482,19 +519,23 @@ const VoiceChatModal = ({ isOpen, onClose }: VoiceChatModalProps) => {
 
     
     isProcessingRef.current = true;
+    setIsListening(false);
     setIsThinking(true);
+    pushDebugEvent('sendMessage_start', { textLen: text.trim().length });
     
 
     try {
       await sendMessage(text, [], { isThinkingEnabled: false, voiceMode: true });
+      pushDebugEvent('sendMessage_done');
     } catch (error) {
+      pushDebugEvent('sendMessage_error', { message: String(error instanceof Error ? error.message : error || '') });
       showNotification('Failed to send message', 'error');
     } finally {
       isProcessingRef.current = false;
     }
-  }, [sendMessage, showNotification]);
+  }, [pushDebugEvent, sendMessage, showNotification]);
 
-  const stopRecording = useCallback(() => {
+  const stopRecording = useCallback((reason: string = 'manual') => {
     
     
     if (animationFrameRef.current !== null) {
@@ -507,9 +548,28 @@ const VoiceChatModal = ({ isOpen, onClose }: VoiceChatModalProps) => {
       mediaRecorderRef.current.stop();
     }
 
-    setIsRecording(false);
+    if (DEBUG_VOICE_VAD) {
+      setDebugInfo((prev) => ({ ...prev, stopReason: reason }));
+      pushDebugEvent('stopRecording', {
+        reason,
+        hasDetectedSpeech: hasDetectedSpeechRef.current,
+        speechActiveFrames: speechActiveFramesRef.current,
+        silentFrames: silentFramesRef.current,
+        voicedFrames: voicedFramesRef.current,
+        noiseFloor: noiseFloorRef.current,
+      });
+    }
+
+    if (reason === 'no_speech_timeout') {
+      setIsThinking(false);
+      noTranscriptCooldownUntilRef.current = Date.now() + 1500;
+      pushDebugEvent('no_speech_timeout_cooldown', { untilMs: noTranscriptCooldownUntilRef.current });
+    }
+
+    // Do not force listening while stopped; auto-restart effect decides when to listen again.
     setIsListening(false);
-  }, []);
+    setIsRecording(false);
+  }, [pushDebugEvent]);
 
   const monitorAudioLevels = useCallback(() => {
     if (!analyserRef.current) return;
@@ -537,30 +597,122 @@ const VoiceChatModal = ({ isOpen, onClose }: VoiceChatModalProps) => {
       const now = performance.now();
       const recordingDuration = now - recordingStartTimeRef.current;
 
-      // Hysteresis-based detection: start vs stop thresholds
-      if (smoothed > SPEECH_START_THRESHOLD) {
-        // Clearly speaking
-        lastSoundTimeRef.current = now;
-      } else if (smoothed < SPEECH_STOP_THRESHOLD) {
-        // Clearly below stop threshold: evaluate silence timeout
-        const silenceDuration = now - lastSoundTimeRef.current;
-        if (recordingDuration > MIN_RECORDING_MS && silenceDuration > SILENCE_DURATION_MS) {
-          
-          stopRecording();
-          return;
+      // Learn ambient noise floor slowly until speech starts.
+      if (!hasDetectedSpeechRef.current && voicedFramesRef.current === 0) {
+        const boundedInstant = Math.min(instantRms, Math.max(0.012, noiseFloorRef.current * 1.35));
+        noiseFloorRef.current = noiseFloorRef.current * 0.96 + boundedInstant * 0.04;
+      }
+
+      const clampedNoiseFloor = Math.min(noiseFloorRef.current, 0.03);
+      const adaptiveStartThreshold = Math.max(SPEECH_START_THRESHOLD, clampedNoiseFloor * 2.0 + 0.003);
+      const adaptiveStopThreshold = Math.max(SPEECH_STOP_THRESHOLD, clampedNoiseFloor * 1.5 + 0.0015);
+
+      if (DEBUG_VOICE_VAD) {
+        if (now - lastDebugUiUpdateRef.current > 180) {
+          lastDebugUiUpdateRef.current = now;
+          setDebugInfo((prev) => ({
+            ...prev,
+            instantRms,
+            smoothedRms: smoothed,
+            adaptiveStartThreshold,
+            adaptiveStopThreshold,
+            noiseFloor: noiseFloorRef.current,
+            silentFrames: silentFramesRef.current,
+            voicedFrames: voicedFramesRef.current,
+            speechActiveFrames: speechActiveFramesRef.current,
+            recordingDurationMs: recordingDuration,
+            silenceDurationMs: now - lastSoundTimeRef.current,
+            hasDetectedSpeech: hasDetectedSpeechRef.current,
+          }));
+        }
+
+        if (now - lastDebugConsoleLogRef.current > 1000) {
+          lastDebugConsoleLogRef.current = now;
+          pushDebugEvent('metrics', {
+            instantRms,
+            smoothedRms: smoothed,
+            adaptiveStartThreshold,
+            adaptiveStopThreshold,
+            noiseFloor: noiseFloorRef.current,
+            silentFrames: silentFramesRef.current,
+            voicedFrames: voicedFramesRef.current,
+            speechActiveFrames: speechActiveFramesRef.current,
+            recordingDurationMs: Math.round(recordingDuration),
+            silenceDurationMs: Math.round(now - lastSoundTimeRef.current),
+            hasDetectedSpeech: hasDetectedSpeechRef.current,
+            isRecording: mediaRecorderRef.current?.state,
+          });
+        }
+      }
+
+      if (!hasDetectedSpeechRef.current && recordingDuration > NO_SPEECH_TIMEOUT_MS) {
+        stopRecording('no_speech_timeout');
+        return;
+      }
+
+      if (recordingDuration > MAX_RECORDING_MS) {
+        stopRecording('max_recording_timeout');
+        return;
+      }
+
+      const silenceDuration = now - lastSoundTimeRef.current;
+      if (hasDetectedSpeechRef.current && silenceDuration > MAX_POST_SPEECH_SILENCE_MS) {
+        stopRecording('max_post_speech_silence');
+        return;
+      }
+
+      // Detection phase: wait for sustained speech above start threshold.
+      if (!hasDetectedSpeechRef.current) {
+        if (smoothed > adaptiveStartThreshold) {
+          voicedFramesRef.current += 1;
+          if (voicedFramesRef.current >= MIN_VOICED_FRAMES_TO_START) {
+            hasDetectedSpeechRef.current = true;
+            silentFramesRef.current = 0;
+            speechActiveFramesRef.current = 0;
+            lastSoundTimeRef.current = now;
+          }
+        } else {
+          // Decay counter instead of hard reset so short jitter doesn't lose detection progress.
+          voicedFramesRef.current = Math.max(0, voicedFramesRef.current - 1);
         }
       } else {
-        // Between stop and start thresholds: do nothing (neutral zone)
+        // Post-detection phase: any energy above stop threshold is still considered ongoing speech.
+        if (smoothed > adaptiveStopThreshold) {
+          lastSoundTimeRef.current = now;
+          silentFramesRef.current = 0;
+          speechActiveFramesRef.current += 1;
+          if (smoothed > adaptiveStartThreshold) {
+            voicedFramesRef.current += 1;
+          }
+        } else {
+          silentFramesRef.current += 1;
+          if (
+            recordingDuration > MIN_RECORDING_MS &&
+            silentFramesRef.current >= MIN_POST_SPEECH_SILENT_FRAMES_TO_STOP
+          ) {
+            stopRecording('silence_frames_trigger');
+            return;
+          }
+
+          if (
+            recordingDuration > MIN_RECORDING_MS &&
+            silenceDuration > SILENCE_DURATION_MS &&
+            silentFramesRef.current >= MIN_SILENT_FRAMES_TO_STOP
+          ) {
+            stopRecording('silence_detected');
+            return;
+          }
+        }
       }
 
       animationFrameRef.current = requestAnimationFrame(checkLevel);
     };
 
     animationFrameRef.current = requestAnimationFrame(checkLevel);
-  }, [stopRecording]);
+  }, [pushDebugEvent, stopRecording]);
 
   const startRecording = useCallback(async () => {
-    if (!mediaStreamRef.current || isRecording || isSpeaking || isProcessingRef.current) {
+    if (!mediaStreamRef.current || isRecording || isSpeaking || isProcessingRef.current || isTranscribingRef.current) {
       return;
     }
 
@@ -568,6 +720,36 @@ const VoiceChatModal = ({ isOpen, onClose }: VoiceChatModalProps) => {
     audioChunksRef.current = [];
     recordingStartTimeRef.current = performance.now();
     lastSoundTimeRef.current = performance.now();
+    smoothedRmsRef.current = 0;
+    silentFramesRef.current = 0;
+    voicedFramesRef.current = 0;
+    speechActiveFramesRef.current = 0;
+    hasDetectedSpeechRef.current = false;
+    noiseFloorRef.current = Math.max(0.0015, noiseFloorRef.current * 0.9);
+    lastDebugUiUpdateRef.current = 0;
+    lastDebugConsoleLogRef.current = 0;
+    if (DEBUG_VOICE_VAD) {
+      setDebugInfo((prev) => ({
+        ...prev,
+        instantRms: 0,
+        smoothedRms: 0,
+        adaptiveStartThreshold: SPEECH_START_THRESHOLD,
+        adaptiveStopThreshold: SPEECH_STOP_THRESHOLD,
+        noiseFloor: noiseFloorRef.current,
+        silentFrames: 0,
+        voicedFrames: 0,
+        speechActiveFrames: 0,
+        recordingDurationMs: 0,
+        silenceDurationMs: 0,
+        lastBlobSize: 0,
+        lastTranscriptLength: 0,
+        hasDetectedSpeech: false,
+        stopReason: 'recording_started',
+      }));
+      pushDebugEvent('recording_started', {
+        noiseFloor: noiseFloorRef.current,
+      });
+    }
 
     // Set up MediaRecorder
     const mimeTypesToTry = [
@@ -607,29 +789,58 @@ const VoiceChatModal = ({ isOpen, onClose }: VoiceChatModalProps) => {
         return;
       }
 
+      if (!hasDetectedSpeechRef.current) {
+        return;
+      }
+
       const blob = new Blob(chunks, { type: recorder.mimeType });
+      if (DEBUG_VOICE_VAD) {
+        pushDebugEvent('blob_ready', { size: blob.size, mimeType: recorder.mimeType });
+        setDebugInfo((prev) => ({ ...prev, lastBlobSize: blob.size }));
+      }
       
 
       if (blob.size < MIN_AUDIO_BYTES) {
+        if (DEBUG_VOICE_VAD) {
+          setDebugInfo((prev) => ({ ...prev, stopReason: 'audio_too_small' }));
+        }
         
         return;
       }
 
+      isTranscribingRef.current = true;
+      pushDebugEvent('transcribe_start', { blobSize: blob.size });
       try {
         const text = await transcribeAudioBlob(blob);
+        if (DEBUG_VOICE_VAD) {
+          pushDebugEvent('transcript_result', { length: (text || '').trim().length });
+          setDebugInfo((prev) => ({ ...prev, lastTranscriptLength: (text || '').trim().length }));
+        }
         if (text && text.trim()) {
           await handleUserSpeech(text);
         } else {
+          setIsThinking(false);
+          noTranscriptCooldownUntilRef.current = Date.now() + 2500;
+          if (DEBUG_VOICE_VAD) {
+            setDebugInfo((prev) => ({ ...prev, stopReason: 'empty_transcript' }));
+            pushDebugEvent('empty_transcript_cooldown', { untilMs: noTranscriptCooldownUntilRef.current });
+          }
           
         }
       } catch (error) {
         const msg = String(error instanceof Error ? error.message : error || '');
+        setIsThinking(false);
+        noTranscriptCooldownUntilRef.current = Date.now() + 2500;
+        pushDebugEvent('transcribe_error', { message: msg, untilMs: noTranscriptCooldownUntilRef.current });
         const isRate = /quota|rate|exceed|429|unauthorized|401|403/i.test(msg);
         if (isRate) {
           // voiceError is set inside transcribeAudioBlob; avoid noisy toast
         } else {
           showNotification(msg || 'Failed to transcribe audio.', 'error');
         }
+      } finally {
+        isTranscribingRef.current = false;
+        pushDebugEvent('transcribe_done');
       }
     };
 
@@ -640,7 +851,7 @@ const VoiceChatModal = ({ isOpen, onClose }: VoiceChatModalProps) => {
 
     // Start monitoring audio levels for silence detection
     monitorAudioLevels();
-  }, [isRecording, isSpeaking, transcribeAudioBlob, handleUserSpeech, showNotification, monitorAudioLevels]);
+  }, [isRecording, isSpeaking, transcribeAudioBlob, handleUserSpeech, showNotification, monitorAudioLevels, pushDebugEvent]);
 
   // Initialize audio context and microphone
   useEffect(() => {
@@ -653,7 +864,15 @@ const VoiceChatModal = ({ isOpen, onClose }: VoiceChatModalProps) => {
     const setup = async () => {
       try {
         
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            noiseSuppression: true,
+            echoCancellation: true,
+            autoGainControl: true,
+            channelCount: 1,
+            sampleRate: 16000,
+          },
+        });
         if (cancelled) {
           stream.getTracks().forEach((track) => track.stop());
           return;
@@ -665,9 +884,14 @@ const VoiceChatModal = ({ isOpen, onClose }: VoiceChatModalProps) => {
         // Set up audio context and analyser
         const audioContext = new AudioContext();
         const source = audioContext.createMediaStreamSource(stream);
+        const highPass = audioContext.createBiquadFilter();
+        highPass.type = 'highpass';
+        highPass.frequency.value = 120;
+        highPass.Q.value = 0.707;
         const analyser = audioContext.createAnalyser();
         analyser.fftSize = 2048;
-        source.connect(analyser);
+        source.connect(highPass);
+        highPass.connect(analyser);
 
         audioContextRef.current = audioContext;
         analyserRef.current = analyser;
@@ -708,14 +932,14 @@ const VoiceChatModal = ({ isOpen, onClose }: VoiceChatModalProps) => {
     if (!isOpen || !isRecording) return;
     // If TTS playback is ongoing, avoid recording to prevent feedback
     if (isSpeaking) {
-      stopRecording();
+      stopRecording('assistant_speaking');
       return;
     }
     // If assistant stream is active (deltas incoming), stop until reply finishes
     if (isStreaming && messages.length > 0) {
       const lastMessage = messages[messages.length - 1];
       if (lastMessage.role === 'assistant') {
-        stopRecording();
+        stopRecording('assistant_streaming');
       }
     }
   }, [isOpen, isRecording, isSpeaking, isStreaming, messages, stopRecording]);
@@ -729,10 +953,12 @@ const VoiceChatModal = ({ isOpen, onClose }: VoiceChatModalProps) => {
       isMicReady &&
       !isRecording &&
       !isProcessingRef.current &&
+      !isTranscribingRef.current &&
       playbackQueueRef.current.length === 0 &&
       pendingTtsQueueRef.current.length === 0 &&
       currentFetchesRef.current === 0 &&
-      pendingTextBufferRef.current.trim().length === 0;
+      pendingTextBufferRef.current.trim().length === 0 &&
+      Date.now() >= noTranscriptCooldownUntilRef.current;
     let t: number | undefined;
     if (ready) {
       // small cooldown to avoid rapid start/stop oscillation
@@ -742,6 +968,32 @@ const VoiceChatModal = ({ isOpen, onClose }: VoiceChatModalProps) => {
     }
     return () => { if (t) window.clearTimeout(t); };
   }, [isSpeaking, isStreaming, isOpen, isMicReady, isRecording, startRecording]);
+
+  // Idle watchdog: refs in ready conditions can change without causing re-render, so retry start periodically.
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const tick = window.setInterval(() => {
+      const ready =
+        !isSpeaking &&
+        !isStreaming &&
+        isMicReady &&
+        !isRecording &&
+        !isProcessingRef.current &&
+        !isTranscribingRef.current &&
+        playbackQueueRef.current.length === 0 &&
+        pendingTtsQueueRef.current.length === 0 &&
+        currentFetchesRef.current === 0 &&
+        pendingTextBufferRef.current.trim().length === 0 &&
+        Date.now() >= noTranscriptCooldownUntilRef.current;
+
+      if (ready) {
+        startRecording();
+      }
+    }, 700);
+
+    return () => window.clearInterval(tick);
+  }, [isMicReady, isOpen, isRecording, isSpeaking, isStreaming, startRecording]);
 
   // Stream assistant deltas into finalized chunks; for each chunk, immediately request TTS and queue the audio for playback
   useEffect(() => {
@@ -824,81 +1076,60 @@ const VoiceChatModal = ({ isOpen, onClose }: VoiceChatModalProps) => {
     // No additional gating; auto-restart effect handles readiness
   }, [isOpen, isStreaming, fetchAndQueueTts]);
 
-  // Build tool blocks for the latest assistant turn (no assistant text rendered)
-  const voiceToolBlocks = useCallback(() => {
+  const latestToolIndicator = useMemo(() => {
     if (!messages || messages.length === 0) return null;
+
     const lastUserIndex = [...messages].findLastIndex((m) => m.role === 'user');
-    const startIndex = Math.max(0, lastUserIndex + 1);
-    const processedIds = new Set<string>();
-    const parts: React.ReactNode[] = [];
+    if (lastUserIndex < 0) return null;
 
-    for (let i = startIndex; i < messages.length; i++) {
-      const m = messages[i] as Message;
+    let latestTool: any = null;
+    for (let i = lastUserIndex + 1; i < messages.length; i++) {
+      const m: any = messages[i];
       if (m.role === 'user') break;
-
-      if (m.role === 'tool_code' && m.tool_id && !processedIds.has(m.tool_id)) {
-        const out = messages.find((x) => x.role === 'tool_code_result' && x.tool_id === m.tool_id);
-        parts.push(
-          <CodeAnalysisBlock key={`v-code-${m.tool_id}`} chatId={activeChatId} toolCodeMessage={m} toolOutputMessage={out} onView={handleOpenViewer} />
-        );
-        processedIds.add(m.tool_id);
-      }
-
-      if (m.role === 'tool_search' && m.tool_id && !processedIds.has(m.tool_id)) {
-        const out = messages.find((x) => x.role === 'tool_search_result' && x.tool_id === m.tool_id);
-        const isGeoMap = out?.content?.includes('[LOCATION]');
-        if (isGeoMap) {
-          parts.push(
-            <GeolocationBlock key={`v-geo-${m.tool_id}`} toolMessage={m} outputMessage={out} />
-          );
-        } else {
-          parts.push(
-            <SearchBlock key={`v-search-${m.tool_id}`} toolSearchMessage={m} toolOutputMessage={out} />
-          );
-        }
-        processedIds.add(m.tool_id);
-      }
-
-      if (m.role === 'tool_doc_extract' && m.tool_id && !processedIds.has(m.tool_id)) {
-        const out = messages.find((x) => x.role === 'tool_doc_extract_result' && x.tool_id === m.tool_id);
-        parts.push(
-          <AnalysisBlock key={`v-extract-${m.tool_id}`} toolMessage={m} outputMessage={out} />
-        );
-        processedIds.add(m.tool_id);
-      }
-
-      if (m.role === 'tool_geolocation' && m.tool_id && !processedIds.has(m.tool_id)) {
-        const hasResult = messages.some((x) => x.role === 'tool_geolocation_result' && x.tool_id === m.tool_id);
-        if (!hasResult) {
-          parts.push(
-            <GeolocationRequestBlock key={`v-geo-req-${m.tool_id}`} toolMessage={m} />
-          );
-        }
-        processedIds.add(m.tool_id);
-      }
-
-      if (m.role === 'tool_integration' && m.tool_id && !processedIds.has(m.tool_id)) {
-        const out = messages.find((x) => x.role === 'tool_integration_result' && x.tool_id === m.tool_id);
-        if (out?.integrationData?.type === 'google_maps_route') {
-          parts.push(
-            <GoogleMapsBlock key={`v-maps-${m.tool_id}`} integrationData={out.integrationData} />
-          );
-        }
-        processedIds.add(m.tool_id);
-      }
-
-      if (m.role === 'tool_integration_result' && m.tool_id && !processedIds.has(m.tool_id)) {
-        if (m.integrationData?.type === 'google_maps_route') {
-          parts.push(
-            <GoogleMapsBlock key={`v-maps-${m.tool_id}`} integrationData={m.integrationData} />
-          );
-        }
-        processedIds.add(m.tool_id);
+      if (typeof m.role === 'string' && m.role.startsWith('tool_') && !m.role.endsWith('_result')) {
+        latestTool = m;
       }
     }
-    if (parts.length === 0) return null;
-    return <div className="voice-tools-pane">{parts}</div>;
-  }, [messages, activeChatId, handleOpenViewer]);
+
+    if (!latestTool?.role) return null;
+
+    const role = latestTool.role as string;
+    const state = latestTool.state || 'executing';
+    const detail =
+      state === 'error'
+        ? 'Failed'
+        : state === 'completed' || state === 'searched'
+          ? 'Used'
+          : 'Using';
+
+    let kind: 'search' | 'code' | 'doc' | 'geo' | 'integration' = 'integration';
+    if (role === 'tool_search') kind = 'search';
+    else if (role === 'tool_code') kind = 'code';
+    else if (role === 'tool_doc_extract') kind = 'doc';
+    else if (role === 'tool_geolocation') kind = 'geo';
+
+    return {
+      id: latestTool.tool_id || role,
+      kind,
+      label: getToolDisplayName(role),
+      detail,
+      state,
+    };
+  }, [messages]);
+
+  const showToolChip = Boolean(
+    latestToolIndicator &&
+    (isStreaming || isThinking || ['writing', 'ready_to_execute', 'executing', 'searching', 'analyzing'].includes(latestToolIndicator.state))
+  );
+
+  const toolChipIcon = useMemo(() => {
+    if (!latestToolIndicator) return <FiCompass size={18} />;
+    if (latestToolIndicator.kind === 'search') return <FiSearch size={18} />;
+    if (latestToolIndicator.kind === 'code') return <FiCode size={18} />;
+    if (latestToolIndicator.kind === 'doc') return <FiFileText size={18} />;
+    if (latestToolIndicator.kind === 'geo') return <FiMapPin size={18} />;
+    return <FiCompass size={18} />;
+  }, [latestToolIndicator]);
 
   // Mic toggling handled automatically; no manual toggle button is shown.
 
@@ -913,6 +1144,9 @@ const VoiceChatModal = ({ isOpen, onClose }: VoiceChatModalProps) => {
     if (isSpeaking) {
       statusText = 'Speaking...';
       statusClass = 'speaking';
+    } else if (isStreaming) {
+      statusText = 'Assistant is working...';
+      statusClass = 'listening';
     } else if (isRecording) {
       statusText = 'Recording... (speak now)';
       statusClass = 'listening';
@@ -937,7 +1171,7 @@ const VoiceChatModal = ({ isOpen, onClose }: VoiceChatModalProps) => {
         </button>
 
         <div className="voice-chat-content">
-          <div className={`ai-orb ${isSpeaking ? 'speaking' : ''} ${isRecording ? 'listening' : ''}`}>
+          <div className={`ai-orb ${isSpeaking ? 'speaking' : ''} ${(isRecording || isListening || isThinking || isStreaming) ? 'listening' : ''}`}>
             <div className="orb-inner"></div>
             <div className="orb-glow"></div>
           </div>
@@ -945,6 +1179,36 @@ const VoiceChatModal = ({ isOpen, onClose }: VoiceChatModalProps) => {
           <div className="voice-chat-status">
             <p className={`status-text ${statusClass}`}>{statusText}</p>
           </div>
+
+          {DEBUG_VOICE_VAD && (
+            <div className="voice-debug-panel">
+              <h4>Voice Debug</h4>
+              <div className="voice-debug-grid">
+                <div><span>instantRMS</span><strong>{debugInfo.instantRms.toFixed(4)}</strong></div>
+                <div><span>smoothedRMS</span><strong>{debugInfo.smoothedRms.toFixed(4)}</strong></div>
+                <div><span>startThr</span><strong>{debugInfo.adaptiveStartThreshold.toFixed(4)}</strong></div>
+                <div><span>stopThr</span><strong>{debugInfo.adaptiveStopThreshold.toFixed(4)}</strong></div>
+                <div><span>noiseFloor</span><strong>{debugInfo.noiseFloor.toFixed(4)}</strong></div>
+                <div><span>voicedFrames</span><strong>{debugInfo.voicedFrames}</strong></div>
+                <div><span>speechFrames</span><strong>{debugInfo.speechActiveFrames}</strong></div>
+                <div><span>silentFrames</span><strong>{debugInfo.silentFrames}</strong></div>
+                <div><span>duration</span><strong>{Math.round(debugInfo.recordingDurationMs)} ms</strong></div>
+                <div><span>silence</span><strong>{Math.round(debugInfo.silenceDurationMs)} ms</strong></div>
+                <div><span>blobSize</span><strong>{debugInfo.lastBlobSize} B</strong></div>
+                <div><span>transcriptLen</span><strong>{debugInfo.lastTranscriptLength}</strong></div>
+                <div><span>speechDetected</span><strong>{debugInfo.hasDetectedSpeech ? 'yes' : 'no'}</strong></div>
+                <div><span>stopReason</span><strong>{debugInfo.stopReason}</strong></div>
+              </div>
+              <div className="voice-debug-events">
+                <h5>Latest Events</h5>
+                <ul>
+                  {debugEvents.map((event, idx) => (
+                    <li key={`${idx}-${event}`}>{event}</li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          )}
 
             {/* Caption removed as requested */}
 
@@ -962,7 +1226,18 @@ const VoiceChatModal = ({ isOpen, onClose }: VoiceChatModalProps) => {
             </div>
           </div>
 
-          {voiceToolBlocks()}
+          <div className="voice-tool-chip-wrap" aria-live="polite">
+            <div
+              className={`voice-tool-chip ${showToolChip ? 'visible' : ''} ${latestToolIndicator?.kind || 'integration'}`}
+              role="status"
+            >
+              <div className="voice-tool-chip-icon">{toolChipIcon}</div>
+              <div className="voice-tool-chip-labels">
+                <span>{latestToolIndicator?.detail || 'Using'}</span>
+                <strong>{latestToolIndicator?.label || 'Tool'}</strong>
+              </div>
+            </div>
+          </div>
 
           <div className="voice-chat-info">
             <p className="info-text">
@@ -970,7 +1245,6 @@ const VoiceChatModal = ({ isOpen, onClose }: VoiceChatModalProps) => {
             </p>
           </div>
           {/* Debug button removed */}
-          <ImageViewer isOpen={isViewerOpen} src={viewerSrc} alt={viewerSrc || ''} onClose={() => setIsViewerOpen(false)} />
           {voiceError && (
             <div className="voice-error-backdrop" role="dialog" aria-modal="true" aria-label="Voice service error">
               <div className="voice-error-card">

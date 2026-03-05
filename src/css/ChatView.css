@@ -110,6 +110,11 @@
   padding: 0;
 }
 
+.chat-view-container.is-empty .chat-view-header {
+  position: relative;
+  z-index: 20;
+}
+
 /* --- Scroll to Bottom Button --- */
 .scroll-to-bottom {
   position: absolute;

@@ -234,6 +234,16 @@ const cleanSearchQuery = (rawContent: string) => {
     return rawContent;
 };
 
+const isAbsoluteLikeUrl = (value: string) => /^(https?:)?\/\//i.test(value) || value.startsWith('data:') || value.startsWith('blob:');
+
+const normalizeAssetCandidate = (value: string) =>
+    decodeURIComponent(String(value || '').trim())
+        .replace(/[?#].*$/, '')
+        .replace(/^<|>$/g, '')
+        .replace(/^"|"$/g, '')
+        .replace(/^\.\//, '')
+        .replace(/^\//, '');
+
 type AssistantTurnProps = { 
   messages: Message[];
   chatId: string | null;
@@ -247,25 +257,62 @@ type AssistantTurnProps = {
 
 const AssistantTurn = memo(({ messages, chatId, startIndex, isStreaming, isThinking, onRegenerate, onCopy, onView }: AssistantTurnProps) => {
     const { openPanel } = useSidePanel();
+
+    const registerFileOutputCandidate = (map: Map<string, string>, candidate: string | undefined, url: string | undefined) => {
+        if (!candidate || !url) return;
+        const normalized = normalizeAssetCandidate(candidate);
+        if (!normalized) return;
+        map.set(normalized, url);
+        const tail = normalized.split('/').pop();
+        if (tail) map.set(tail, url);
+    };
+
+    const fileOutputUrlsByName = useMemo(() => {
+        const map = new Map<string, string>();
+
+        for (let i = 0; i < messages.length; i++) {
+            const msg = messages[i];
+
+            if (!msg.fileOutputs?.length) continue;
+
+            for (const output of msg.fileOutputs) {
+                if (!output?.url) continue;
+                registerFileOutputCandidate(map, output.fileName, output.url);
+                registerFileOutputCandidate(map, output.gcsObjectName, output.url);
+            }
+        }
+
+        return map;
+    }, [messages]);
+
+    const resolveTurnFileOutputUrl = useCallback((value: string): string => {
+        if (!value) return value;
+        if (isAbsoluteLikeUrl(value)) return value;
+
+        const normalized = normalizeAssetCandidate(value);
+        return fileOutputUrlsByName.get(normalized) || fileOutputUrlsByName.get(value) || value;
+    }, [fileOutputUrlsByName]);
     
     const ImageRenderer: Components['img'] = ({ src, alt }) => {
         if (!src) return null;
+        const resolvedSrc = resolveTurnFileOutputUrl(src);
         return (
-            <a href={src} onClick={(e) => { e.preventDefault(); onView(src); }} className="markdown-image-wrapper">
-                <img src={src} alt={alt || 'image from message'} />
+            <a href={resolvedSrc} onClick={(e) => { e.preventDefault(); onView(resolvedSrc); }} className="markdown-image-wrapper">
+                <img src={resolvedSrc} alt={alt || 'image from message'} />
             </a>
         );
     };
 
     const LinkRenderer: Components['a'] = ({ href, children }) => {
         if (!href) return <>{children}</>;
+        const resolvedHref = resolveTurnFileOutputUrl(href);
         
         // Handle Images
-        const isImage = href.match(/\.(jpeg|jpg|gif|png|bmp|webp)($|\?)/i);
+        const isImage = resolvedHref.match(/\.(jpeg|jpg|gif|png|bmp|webp)($|\?)/i);
         if (isImage) {
             return (
-                <a href={href} onClick={(e) => { e.preventDefault(); onView(href); }} className="markdown-image-wrapper">
-                    <img src={href} alt={String(children) || 'generated image'} />
+                <a href={resolvedHref} onClick={(e) => { e.preventDefault(); onView(resolvedHref); }} className="markdown-image-wrapper">
+                    <img src={resolvedHref} alt={String(children) || 'generated image'} />
                 </a>
             );
         }
@@ -279,7 +326,7 @@ const AssistantTurn = memo(({ messages, chatId, startIndex, isStreaming, isThink
             return (
                 <Tooltip text={href}>
                     <a 
-                        href={href} 
+                        href={resolvedHref} 
                         target="_blank" 
                         rel="noopener noreferrer" 
                         className="chat-link-icon-only"
@@ -294,11 +341,11 @@ const AssistantTurn = memo(({ messages, chatId, startIndex, isStreaming, isThink
         // For named links like [Click Here](url), keep text + small icon
         return (
             <span className="link-container">
-                <a href={href} target="_blank" rel="noopener noreferrer" className="chat-link-text">
+                <a href={resolvedHref} target="_blank" rel="noopener noreferrer" className="chat-link-text">
                     {children}
                 </a>
-                <Tooltip text={href}>
-                    <a href={href} target="_blank" rel="noopener noreferrer" style={linkButtonStyle} className="chat-link-button">
+                <Tooltip text={resolvedHref}>
+                    <a href={resolvedHref} target="_blank" rel="noopener noreferrer" style={linkButtonStyle} className="chat-link-button">
                         <FiExternalLink size={12} />
                     </a>
                 </Tooltip>
@@ -383,11 +430,29 @@ const AssistantTurn = memo(({ messages, chatId, startIndex, isStreaming, isThink
                     if (!hasResult) {
                         parts.push(<GeolocationRequestBlock key={`geo-req-${currentMessage.tool_id}`} toolMessage={currentMessage} />);
                     }
-                } else if (toolType === 'tool_integration' || toolType === 'tool_integration_result') {
+                } else if (
+                    toolType === 'tool_integration' ||
+                    toolType === 'tool_integration_result' ||
+                    toolType === 'tool_guide' ||
+                    toolType === 'tool_guide_result'
+                ) {
                     flushTextBuffer(`text-before-int-${i}`);
                     const data = outputMessage?.integrationData || (currentMessage.role === 'tool_integration_result' ? currentMessage.integrationData : null);
                     if (data?.type === 'google_maps_route') {
                         parts.push(<GoogleMapsBlock key={`maps-${currentMessage.tool_id}`} integrationData={data} />);
+                    } else {
+                        const textOutput = outputMessage?.content || ((currentMessage.role === 'tool_integration_result' || currentMessage.role === 'tool_guide_result') ? currentMessage.content : null);
+                        if (textOutput && textOutput.trim()) {
+                            parts.push(
+                                <StreamingText
+                                    key={`integration-text-${currentMessage.tool_id}-${i}`}
+                                    content={textOutput}
+                                    isStreaming={false}
+                                    components={{ code: CustomCode, p: Paragraph, img: ImageRenderer, a: LinkRenderer }}
+                                />
+                            );
+                            textParts.push(textOutput);
+                        }
                     }
                 }
                 processedToolIds.add(currentMessage.tool_id);

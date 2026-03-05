@@ -17,7 +17,7 @@ export type FileOutput = {
 };
 
 export type Message = {
-  role: 'user' | 'assistant' | 'tool_code_result' | 'tool_code' | 'tool_search_result' | 'tool_search' | 'tool_doc_extract' | 'tool_doc_extract_result' | 'tool_integration' | 'tool_integration_result' | 'tool_geolocation' | 'tool_geolocation_result';
+  role: 'user' | 'assistant' | 'tool_code_result' | 'tool_code' | 'tool_search_result' | 'tool_search' | 'tool_doc_extract' | 'tool_doc_extract_result' | 'tool_integration' | 'tool_integration_result' | 'tool_geolocation' | 'tool_geolocation_result' | 'tool_guide' | 'tool_guide_result';
   content: string | null;
   attachments?: Attachment[];
   tool_id?: string;

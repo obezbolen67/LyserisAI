@@ -103,6 +103,18 @@
   color: var(--primary-text-color);
 }
 
+.provider-icon-fallback {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background-color: var(--button-hover-bg);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
 .model-item-details {
   display: flex;
   flex-direction: column;
