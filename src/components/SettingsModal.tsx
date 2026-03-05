@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useSettings } from '../contexts/SettingsContext';
 import { useNotification } from '../contexts/NotificationContext';
@@ -146,10 +146,12 @@ const SettingsModal = ({ isOpen, onClose }: SettingsModalProps) => {
   const [editingCustomProviderId, setEditingCustomProviderId] = useState<string | null>(null);
   const [editableCustomProviderName, setEditableCustomProviderName] = useState('');
 
-  const customProviderEntries = providerConfigs
-    .map((config) => config.provider)
-    .filter((providerId, index, arr) => !baseProviderIds.has(providerId) && arr.indexOf(providerId) === index)
-    .sort();
+  const customProviderEntries = useMemo(() => (
+    providerConfigs
+      .map((config) => config.provider)
+      .filter((providerId, index, arr) => !baseProviderIds.has(providerId) && arr.indexOf(providerId) === index)
+      .sort()
+  ), [providerConfigs]);
 
   const getProviderConfig = useCallback((providerId: string): ProviderConfig => {
     if (providerId === 'default') {
@@ -356,7 +358,12 @@ const SettingsModal = ({ isOpen, onClose }: SettingsModalProps) => {
     try {
       const res = await api('/models', {
         method: 'POST',
-        body: JSON.stringify({ provider: providerId }),
+        body: JSON.stringify({
+          provider: providerId,
+          apiKeys,
+          providerConfigs,
+          baseUrl: getProviderConfig('openai').baseUrl || '',
+        }),
       });
       const payload = await res.json().catch(() => []);
       if (!res.ok) {
@@ -760,7 +767,7 @@ const SettingsModal = ({ isOpen, onClose }: SettingsModalProps) => {
     const sectionProviderId = isGeneralSection ? selectedProvider : gptSection.replace('provider:', '');
     const isDefaultProviderSelected = sectionProviderId === 'default';
     const currentProviderConfig = getProviderConfig(sectionProviderId);
-    const currentApiKey = apiKeys.find((entry) => entry.provider === selectedProvider)?.key || '';
+    const currentApiKey = apiKeys.find((entry) => entry.provider === sectionProviderId)?.key || '';
     const allProviderOptions: Provider[] = [
       ...providers,
       ...customProviderEntries.map((providerId) => ({
