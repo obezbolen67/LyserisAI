@@ -1261,10 +1261,6 @@ const SettingsModal = ({ isOpen, onClose, initialTab = 'GPT' }: SettingsModalPro
                       const openRouterModels = providerModels['openrouter'] || [];
                       const openRouterModel = openRouterModels.find((model) => model.id === modelEntry.id);
 
-                      const inputModalities = Array.isArray(providerModel?.architecture?.input_modalities)
-                        ? providerModel.architecture.input_modalities.map((value) => String(value || '').toLowerCase())
-                        : [];
-                      const modalitySignature = String(providerModel?.architecture?.modality || '').toLowerCase();
                       const isOpenRouterModel = modelEntry.provider === 'openrouter';
                       const isDefaultModel = modelEntry.provider === 'default';
                       const hasImageModality = isOpenRouterModel || isDefaultModel
