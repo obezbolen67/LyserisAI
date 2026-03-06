@@ -1,4 +1,3 @@
-// tsconfig.app.json
 {
   "compilerOptions": {
     "composite": true,
@@ -8,9 +7,6 @@
     "lib": ["ES2023", "DOM", "DOM.Iterable"],
     "module": "ESNext",
     "skipLibCheck": true,
-    
-    /* ADD THIS "types" ARRAY */
-    "types": ["vite/client", "vite-plugin-svgr/client"], // <-- ADD THIS LINE
 
     /* Bundler mode */
     "moduleResolution": "bundler",
@@ -26,6 +22,5 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true
   },
-  // "src/utils" is redundant because "src" already includes it.
-  "include": ["src", "../vite-env.d.ts"] // <-- CLEANED UP
+  "include": ["src"]
 }
