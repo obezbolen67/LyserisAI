@@ -54,7 +54,7 @@ interface SettingsModalProps { isOpen: boolean; onClose: () => void; initialTab?
 const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1';
 
 const providers: Provider[] = [
-  { id: 'default', name: "Default (Free)",Icon: GeminiIcon},
+  { id: 'default', name: "Default (Free)", Icon: GeminiIcon },
   { id: 'openrouter', name: 'OpenRouter', Icon: OpenAIIcon },
   { id: 'openai', name: 'OpenAI', Icon: OpenAIIcon },
   { id: 'anthropic', name: 'Anthropic', Icon: AnthropicIcon },
@@ -115,7 +115,7 @@ const SettingsModal = ({ isOpen, onClose, initialTab = 'GPT' }: SettingsModalPro
   const { user, updateSettings, theme, setTheme, loadUser } = useSettings();
   const { showNotification } = useNotification();
   const navigate = useNavigate();
-  
+
   const [activeTab, setActiveTab] = useState<ActiveTab>('GPT');
   const [isClosing, setIsClosing] = useState(false);
   const [selectedProvider, setSelectedProvider] = useState(user?.selectedProvider || 'default');
@@ -143,7 +143,7 @@ const SettingsModal = ({ isOpen, onClose, initialTab = 'GPT' }: SettingsModalPro
   const closeTimeoutRef = useRef<number | null>(null);
   const previewAudioRef = useRef<HTMLAudioElement | null>(null);
   const hasRefreshedSubscriptionRef = useRef(false);
-  
+
   const [isEditingContext, setIsEditingContext] = useState(false);
   const [editableContextValue, setEditableContextValue] = useState(String(MIN_CONTEXT));
   const [isEditingMaxOutput, setIsEditingMaxOutput] = useState(false);
@@ -262,12 +262,12 @@ const SettingsModal = ({ isOpen, onClose, initialTab = 'GPT' }: SettingsModalPro
     if (isOpen && user) {
       const nextProviderConfigs = Array.isArray(user.providerConfigs)
         ? user.providerConfigs.map((config) => ({
-            provider: config.provider,
-            baseUrl: config.baseUrl || '',
-            enabled: config.enabled !== false,
-            contextLength: config.contextLength || MIN_CONTEXT,
-            maxOutputTokens: config.maxOutputTokens || 4096,
-          }))
+          provider: config.provider,
+          baseUrl: config.baseUrl || '',
+          enabled: config.enabled !== false,
+          contextLength: config.contextLength || MIN_CONTEXT,
+          maxOutputTokens: config.maxOutputTokens || 4096,
+        }))
         : [];
 
       if (user.baseUrl && !nextProviderConfigs.some((config) => config.provider === 'openai')) {
@@ -434,6 +434,7 @@ const SettingsModal = ({ isOpen, onClose, initialTab = 'GPT' }: SettingsModalPro
         seen.add(model.id);
         return true;
       });
+      console.log(`[SETTINGS] Fetched ${uniqueModels.length} models for ${providerId}, first model architecture:`, uniqueModels[0]?.architecture);
       setProviderModels((prev) => ({ ...prev, [providerId]: uniqueModels }));
       return uniqueModels;
     } catch (error) {
@@ -457,13 +458,18 @@ const SettingsModal = ({ isOpen, onClose, initialTab = 'GPT' }: SettingsModalPro
       return hasKey && !providerModels[providerId];
     });
 
-    if (pendingProviderIds.length === 0) return;
+    const needsOpenRouterForDefault = !providerModels['openrouter'];
+
+    if (pendingProviderIds.length === 0 && !needsOpenRouterForDefault) return;
 
     let cancelled = false;
     const load = async () => {
       for (const providerId of pendingProviderIds) {
         if (cancelled) break;
         await fetchProviderModels(providerId);
+      }
+      if (needsOpenRouterForDefault && !cancelled) {
+        await fetchProviderModels('openrouter');
       }
     };
 
@@ -488,6 +494,27 @@ const SettingsModal = ({ isOpen, onClose, initialTab = 'GPT' }: SettingsModalPro
     setFetchError('');
   };
 
+  const resolveProviderModalities = (modelId: string, providerId: string, existing?: ModelConfig) => {
+    const model = (providerModels[providerId] || []).find((entry) => entry.id === modelId)
+      || (providerId === 'default' ? (providerModels['openrouter'] || []).find((entry) => entry.id === modelId) : undefined);
+
+    const inputModalities = Array.isArray(model?.architecture?.input_modalities)
+      ? model.architecture.input_modalities.map((value) => String(value || '').toLowerCase())
+      : [];
+    const modalitySignature = String(model?.architecture?.modality || '').toLowerCase();
+    const hasImage = inputModalities.some((value) => value.includes('image')) || modalitySignature.includes('image');
+
+    if (hasImage) {
+      return ['text', 'image'] as Modality[];
+    }
+
+    if (existing?.modalities && existing.modalities.length > 0) {
+      return existing.modalities;
+    }
+
+    return ['text'] as Modality[];
+  };
+
   const handleQuickAccessChange = (entry: ProviderModelEntry) => {
     setQuickAccessModels((prev) => {
       const modelConfig = modelConfigs.find((config) => config.id === entry.id);
@@ -508,10 +535,11 @@ const SettingsModal = ({ isOpen, onClose, initialTab = 'GPT' }: SettingsModalPro
       }
 
       const withoutCurrent = prev.filter((config) => config.id !== entry.id);
+      const resolvedModalities = resolveProviderModalities(entry.id, entry.provider, existing);
       return [...withoutCurrent, {
         id: entry.id,
         provider: entry.provider,
-        modalities: existing?.modalities && existing.modalities.length > 0 ? existing.modalities : ['text'],
+        modalities: resolvedModalities,
       }];
     });
   };
@@ -810,7 +838,7 @@ const SettingsModal = ({ isOpen, onClose, initialTab = 'GPT' }: SettingsModalPro
         enabledIntegrations,
         voiceSettings: { voiceId, voiceName },
       };
-      
+
       await updateSettings(settingsToSave);
 
       showNotification('Settings Saved!');
@@ -988,45 +1016,34 @@ const SettingsModal = ({ isOpen, onClose, initialTab = 'GPT' }: SettingsModalPro
           ? 'No selected models match the current filters.'
           : 'No models found matching your search.';
     const getApiKeyPlaceholder = () => {
-        switch (sectionProviderId) {
-            case 'openai': return 'Required: sk-...';
-            case 'anthropic': return 'Required: sk-ant-...';
-            case 'gemini': return 'Required: Your Gemini API Key';
-            default: return 'API Key';
-        }
+      switch (sectionProviderId) {
+        case 'openai': return 'Required: sk-...';
+        case 'anthropic': return 'Required: sk-ant-...';
+        case 'gemini': return 'Required: Your Gemini API Key';
+        default: return 'API Key';
+      }
     };
 
     return (
-    <>
-      <h3>GPT Settings</h3>
-      <p>Configure your connection to a compatible LLM provider.</p>
-      <div className="gpt-mobile-tree-wrapper">
-        {renderGptTree('gpt-mobile-tree')}
-      </div>
-      <div className="gpt-section-content">
-          {isGeneralSection && isDefaultProviderSelected ? (
-            <div className="form-group default-provider-info">
-              <p className="description">
-                You are using free Gemini 2.5 Flash model.
-              </p>
-              <p>
-                Rate limits spread across all users.
-              </p>
-            </div>
-          ) : null}
-
+      <>
+        <h3>GPT Settings</h3>
+        <p>Configure your connection to a compatible LLM provider.</p>
+        <div className="gpt-mobile-tree-wrapper">
+          {renderGptTree('gpt-mobile-tree')}
+        </div>
+        <div className="gpt-section-content">
           {!isGeneralSection && !isDefaultProviderSelected && (
             <>
               <div className="form-group">
                 <label htmlFor="apiKey">API Key</label>
                 <div className="input-wrapper">
-                  <input 
-                    id="apiKey" 
+                  <input
+                    id="apiKey"
                     type={isApiKeyVisible ? 'text' : 'password'}
                     className={!isApiKeyVisible ? 'input-hidden' : ''}
                     value={apiKeys.find(k => k.provider === sectionProviderId)?.key || ''}
-                    onChange={(e) => handleApiKeyChange(sectionProviderId, e.target.value)} 
-                    placeholder={ getApiKeyPlaceholder() }
+                    onChange={(e) => handleApiKeyChange(sectionProviderId, e.target.value)}
+                    placeholder={getApiKeyPlaceholder()}
                     autoComplete="off"
                   />
                   <Tooltip text={isApiKeyVisible ? "Hide API Key" : "Show API Key"}>
@@ -1066,16 +1083,16 @@ const SettingsModal = ({ isOpen, onClose, initialTab = 'GPT' }: SettingsModalPro
                   {(sectionProviderId === 'openai' || customProviderEntries.includes(sectionProviderId)) && (
                     <div className="form-group">
                       <label htmlFor="baseUrl">Base URL (optional)</label>
-                      <input 
-                          id="baseUrl" 
-                          type="text" 
-                          value={currentProviderConfig.baseUrl} 
-                          onChange={(e) => setProviderConfig(sectionProviderId, { baseUrl: e.target.value })} 
-                          placeholder="e.g., https://api.groq.com/openai/v1"
+                      <input
+                        id="baseUrl"
+                        type="text"
+                        value={currentProviderConfig.baseUrl}
+                        onChange={(e) => setProviderConfig(sectionProviderId, { baseUrl: e.target.value })}
+                        placeholder="e.g., https://api.groq.com/openai/v1"
                       />
                     </div>
                   )}
-                  
+
                   <div className="form-group">
                     <div className="label-with-value">
                       <label htmlFor="contextLength">Total Context Length</label>
@@ -1103,16 +1120,16 @@ const SettingsModal = ({ isOpen, onClose, initialTab = 'GPT' }: SettingsModalPro
                       The total token window for the model (input + output). Set this to your selected model's maximum context.
                     </p>
                     <div className="context-slider-group">
-                        <input 
-                            type="range" 
-                            id="contextLength"
-                            min={MIN_CONTEXT}
-                            max={MAX_CONTEXT}
-                            step="1024"
-                            value={currentProviderConfig.contextLength}
-                            onChange={(e) => setProviderConfig(sectionProviderId, { contextLength: parseInt(e.target.value, 10) })}
-                            className="context-slider"
-                        />
+                      <input
+                        type="range"
+                        id="contextLength"
+                        min={MIN_CONTEXT}
+                        max={MAX_CONTEXT}
+                        step="1024"
+                        value={currentProviderConfig.contextLength}
+                        onChange={(e) => setProviderConfig(sectionProviderId, { contextLength: parseInt(e.target.value, 10) })}
+                        className="context-slider"
+                      />
                     </div>
                   </div>
 
@@ -1143,16 +1160,16 @@ const SettingsModal = ({ isOpen, onClose, initialTab = 'GPT' }: SettingsModalPro
                       Controls the maximum tokens the model can generate in one response. This is reserved from the total context length.
                     </p>
                     <div className="context-slider-group">
-                        <input 
-                            type="range" 
-                            id="maxOutputTokens"
-                            min={MIN_OUTPUT_TOKENS}
-                            max={MAX_OUTPUT_TOKENS}
-                            step="256"
-                            value={currentProviderConfig.maxOutputTokens}
-                            onChange={(e) => setProviderConfig(sectionProviderId, { maxOutputTokens: parseInt(e.target.value, 10) })}
-                            className="context-slider"
-                        />
+                      <input
+                        type="range"
+                        id="maxOutputTokens"
+                        min={MIN_OUTPUT_TOKENS}
+                        max={MAX_OUTPUT_TOKENS}
+                        step="256"
+                        value={currentProviderConfig.maxOutputTokens}
+                        onChange={(e) => setProviderConfig(sectionProviderId, { maxOutputTokens: parseInt(e.target.value, 10) })}
+                        className="context-slider"
+                      />
                     </div>
                   </div>
                 </>
@@ -1162,99 +1179,119 @@ const SettingsModal = ({ isOpen, onClose, initialTab = 'GPT' }: SettingsModalPro
 
           {isGeneralSection && (
             <>
-                <div className="form-group">
-                  <label>Active Models</label>
-                  <p className="description">Models from enabled providers that appear in your chat model list.</p>
-                  
-                  <div className="model-search-wrapper">
-                    <input
-                      type="text"
-                      className="model-search-input"
-                      placeholder="Search available models..."
-                      value={modelSearchQuery}
-                      onChange={(e) => setModelSearchQuery(e.target.value)}
-                    />
-                    <button 
-                        className={`model-search-clear-btn ${modelSearchQuery ? 'visible' : ''}`}
-                        onClick={() => setModelSearchQuery('')}
-                      >
-                        <FiX size={18} />
-                    </button>
-                  </div>
+              <div className="form-group">
+                <label>Active Models</label>
+                <p className="description">Models from enabled providers that appear in your chat model list.</p>
+
+                <div className="model-search-wrapper">
+                  <input
+                    type="text"
+                    className="model-search-input"
+                    placeholder="Search available models..."
+                    value={modelSearchQuery}
+                    onChange={(e) => setModelSearchQuery(e.target.value)}
+                  />
+                  <button
+                    className={`model-search-clear-btn ${modelSearchQuery ? 'visible' : ''}`}
+                    onClick={() => setModelSearchQuery('')}
+                  >
+                    <FiX size={18} />
+                  </button>
+                </div>
+                <button
+                  type="button"
+                  className={`model-filter-toggle ${showSelectedOnly ? 'active' : ''}`}
+                  onClick={() => setShowSelectedOnly((prev) => !prev)}
+                >
+                  Show Selected
+                </button>
+
+                <div className="model-provider-filters">
                   <button
                     type="button"
-                    className={`model-filter-toggle ${showSelectedOnly ? 'active' : ''}`}
-                    onClick={() => setShowSelectedOnly((prev) => !prev)}
+                    className={`model-filter-toggle ${activeProviderFilters.length === 0 ? 'active' : ''}`}
+                    onClick={() => setModelProviderFilters([])}
                   >
-                    Show Selected
+                    All Providers
                   </button>
-
-                  <div className="model-provider-filters">
-                    <button
-                      type="button"
-                      className={`model-filter-toggle ${activeProviderFilters.length === 0 ? 'active' : ''}`}
-                      onClick={() => setModelProviderFilters([])}
-                    >
-                      All Providers
-                    </button>
-                    {enabledProviderIds.map((providerId) => {
-                      const providerLabel = allProviderOptions.find((provider) => provider.id === providerId)?.name || providerId;
-                      const active = activeProviderFilters.includes(providerId);
-                      return (
-                        <button
-                          key={`provider-filter-${providerId}`}
-                          type="button"
-                          className={`model-filter-toggle ${active ? 'active' : ''}`}
-                          onClick={() => {
-                            setModelProviderFilters((prev) => (
-                              prev.includes(providerId)
-                                ? prev.filter((id) => id !== providerId)
-                                : [...prev.filter((id) => enabledProviderIds.includes(id)), providerId]
-                            ));
-                          }}
-                        >
-                          {providerLabel}
-                        </button>
-                      );
-                    })}
-                  </div>
-
-                  <div className="model-select-wrapper">
-                    <div className="placeholder-selector">
-                      {isFetching ? 'Loading models...' : 'Refresh models for selected provider'}
-                    </div>
-                    <Tooltip text={!currentApiKey ? 'API Key is required' : 'Refresh models'}>
+                  {enabledProviderIds.map((providerId) => {
+                    const providerLabel = allProviderOptions.find((provider) => provider.id === providerId)?.name || providerId;
+                    const active = activeProviderFilters.includes(providerId);
+                    return (
                       <button
-                        className="refresh-button"
-                        onClick={handleManualFetch}
-                        disabled={isFetching || !currentApiKey}
+                        key={`provider-filter-${providerId}`}
+                        type="button"
+                        className={`model-filter-toggle ${active ? 'active' : ''}`}
+                        onClick={() => {
+                          setModelProviderFilters((prev) => (
+                            prev.includes(providerId)
+                              ? prev.filter((id) => id !== providerId)
+                              : [...prev.filter((id) => enabledProviderIds.includes(id)), providerId]
+                          ));
+                        }}
                       >
-                        {isFetching ? '...' : <FiRefreshCw size={16} />}
+                        {providerLabel}
                       </button>
-                    </Tooltip>
+                    );
+                  })}
+                </div>
+
+                <div className="model-select-wrapper">
+                  <div className="placeholder-selector">
+                    {isFetching ? 'Loading models...' : 'Refresh models for selected provider'}
                   </div>
+                  <Tooltip text={!currentApiKey ? 'API Key is required' : 'Refresh models'}>
+                    <button
+                      className="refresh-button"
+                      onClick={handleManualFetch}
+                      disabled={isFetching || !currentApiKey}
+                    >
+                      {isFetching ? '...' : <FiRefreshCw size={16} />}
+                    </button>
+                  </Tooltip>
+                </div>
 
-                  <div className="quick-access-list">
-                    {filteredModels.length === 0 ? (
-                      <div className="no-models-found">{emptyModelsMessage}</div>
-                    ) : (
-                      filteredModels.map((modelEntry) => {
-                        const config = modelConfigs.find((c) => c.id === modelEntry.id && (c.provider || modelEntry.provider) === modelEntry.provider) || { modalities: ['text'] };
-                        const providerModel = (providerModels[modelEntry.provider] || []).find((model) => model.id === modelEntry.id);
-                        const inputModalities = Array.isArray(providerModel?.architecture?.input_modalities)
-                          ? providerModel.architecture.input_modalities.map((value) => String(value || '').toLowerCase())
-                          : [];
-                        const modalitySignature = String(providerModel?.architecture?.modality || '').toLowerCase();
-                        const isOpenRouterModel = modelEntry.provider === 'openrouter';
-                        const hasImageModality = isOpenRouterModel
-                          ? (inputModalities.some((value) => value.includes('image')) || modalitySignature.includes('image'))
-                          : config.modalities.some(modality => modality === 'image');
-                        const modelKey = `${modelEntry.provider}:${modelEntry.id}`;
-                        const checked = isModelChecked(modelEntry);
-                        const providerInfo = allProviderOptions.find((provider) => provider.id === modelEntry.provider);
-                        const ProviderIcon = providerInfo?.Icon;
+                <div className="quick-access-list">
+                  {filteredModels.length === 0 ? (
+                    <div className="no-models-found">{emptyModelsMessage}</div>
+                  ) : (
+                    filteredModels.map((modelEntry) => {
+                      const config = modelConfigs.find((c) => c.id === modelEntry.id && (c.provider || modelEntry.provider) === modelEntry.provider) || { modalities: ['text'] };
+                      const providerModel = (providerModels[modelEntry.provider] || []).find((model) => model.id === modelEntry.id);
+                      const openRouterModels = providerModels['openrouter'] || [];
+                      const openRouterModel = openRouterModels.find((model) => model.id === modelEntry.id);
 
-                        return (
+                      const inputModalities = Array.isArray(providerModel?.architecture?.input_modalities)
+                        ? providerModel.architecture.input_modalities.map((value) => String(value || '').toLowerCase())
+                        : [];
+                      const modalitySignature = String(providerModel?.architecture?.modality || '').toLowerCase();
+                      const isOpenRouterModel = modelEntry.provider === 'openrouter';
+                      const isDefaultModel = modelEntry.provider === 'default';
+                      const hasImageModality = isOpenRouterModel || isDefaultModel
+                        ? (() => {
+                            const model = isDefaultModel ? openRouterModel : providerModel;
+                            const inputMods = Array.isArray(model?.architecture?.input_modalities)
+                              ? model.architecture.input_modalities.map((v: string) => v.toLowerCase())
+                              : [];
+                            const modSig = String(model?.architecture?.modality || '').toLowerCase();
+                            const result = inputMods.some((v) => v.includes('image')) || modSig.includes('image');
+                            if (modelEntry.id.includes('qwen')) {
+                              console.log(`[SETTINGS] Model ${modelEntry.id}:`, {
+                                found: !!model,
+                                inputMods,
+                                modSig,
+                                result
+                              });
+                            }
+                            return result;
+                          })()
+                        : config.modalities.some(modality => modality === 'image');
+                      const modelKey = `${modelEntry.provider}:${modelEntry.id}`;
+                      const checked = isModelChecked(modelEntry);
+                      const providerInfo = allProviderOptions.find((provider) => provider.id === modelEntry.provider);
+                      const ProviderIcon = providerInfo?.Icon;
+
+                      return (
                         <div
                           key={modelKey}
                           className={`quick-access-row ${checked ? 'selected' : ''}`}
@@ -1283,7 +1320,7 @@ const SettingsModal = ({ isOpen, onClose, initialTab = 'GPT' }: SettingsModalPro
                               onMouseDown={(event) => event.stopPropagation()}
                             >
                               <button className="model-config-button" onClick={(e) => handleMenuToggle(modelKey, e)} disabled={!checked}>
-                                <FiMoreVertical size={16}/>
+                                <FiMoreVertical size={16} />
                               </button>
                               {openConfigMenuId === modelKey && (
                                 <Portal>
@@ -1295,14 +1332,14 @@ const SettingsModal = ({ isOpen, onClose, initialTab = 'GPT' }: SettingsModalPro
                                     onMouseDown={(event) => event.stopPropagation()}
                                   >
                                     <label className="config-menu-item">
-                                        <input type="checkbox" checked disabled />
-                                        <span>Text</span>
-                                        <span className="modality-dot active"></span>
+                                      <input type="checkbox" checked disabled />
+                                      <span>Text</span>
+                                      <span className="modality-dot active"></span>
                                     </label>
                                     <label className="config-menu-item">
-                                        <input type="checkbox" checked={hasImageModality} onChange={(e) => handleModalityChange(modelEntry.id, modelEntry.provider, 'image', e.target.checked)} />
-                                        <span>Image</span>
-                                        <span className={`modality-dot ${hasImageModality ? 'active' : ''}`}></span>
+                                      <input type="checkbox" checked={hasImageModality} onChange={(e) => handleModalityChange(modelEntry.id, modelEntry.provider, 'image', e.target.checked)} />
+                                      <span>Image</span>
+                                      <span className={`modality-dot ${hasImageModality ? 'active' : ''}`}></span>
                                     </label>
                                   </div>
                                 </Portal>
@@ -1310,21 +1347,21 @@ const SettingsModal = ({ isOpen, onClose, initialTab = 'GPT' }: SettingsModalPro
                             </div>
                           )}
                         </div>
-                        );
-                      })
-                    )}
-                  </div>
-                  {fetchError && <p className="error-text">{fetchError}</p>}
+                      );
+                    })
+                  )}
                 </div>
+                {fetchError && <p className="error-text">{fetchError}</p>}
+              </div>
             </>
           )}
-      </div>
-      
-      <div className="modal-actions">
-        <button className="modal-button modal-button-cancel" onClick={handleClose}>Cancel</button>
-        <button className="modal-button modal-button-save" onClick={handleSave}>Save & Close</button>
-      </div>
-    </>
+        </div>
+
+        <div className="modal-actions">
+          <button className="modal-button modal-button-cancel" onClick={handleClose}>Cancel</button>
+          <button className="modal-button modal-button-save" onClick={handleSave}>Save & Close</button>
+        </div>
+      </>
     );
   };
 
@@ -1521,7 +1558,7 @@ const SettingsModal = ({ isOpen, onClose, initialTab = 'GPT' }: SettingsModalPro
       <>
         <h3>Account</h3>
         <p>Manage your account, credits, and billing.</p>
-        
+
         <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
           {/* Subscription Section */}
           <div className={`subscription-info-card ${statusClass}`}>

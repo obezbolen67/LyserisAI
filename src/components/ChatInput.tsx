@@ -30,8 +30,8 @@ const generateThumbnail = async (file: File): Promise<string> => {
         const scale = maxWidth / img.width;
         // If image is already small, don't resize
         if (scale >= 1) {
-            resolve(e.target?.result as string);
-            return;
+          resolve(e.target?.result as string);
+          return;
         }
         const canvas = document.createElement('canvas');
         canvas.width = maxWidth;
@@ -49,42 +49,42 @@ const generateThumbnail = async (file: File): Promise<string> => {
 // --- SUB-COMPONENT: Attachment Preview Item ---
 // Handles async thumbnail generation to prevent blocking the main render loop
 const AttachmentPreviewItem = memo(({ file, onRemove }: { file: File, onRemove: (f: File) => void }) => {
-    const [thumbnailSrc, setThumbnailSrc] = useState<string | null>(null);
-    const isImage = file.type.startsWith('image/');
-  
-    useEffect(() => {
-      let active = true;
-      if (isImage) {
-        generateThumbnail(file).then(src => {
-          if (active) setThumbnailSrc(src);
-        });
-      }
-      return () => { active = false; };
-    }, [file, isImage]);
-  
-    return (
-      <div className="attachment-preview-wrapper">
-        {isImage ? (
-          <div className="attachment-thumbnail">
-            {thumbnailSrc ? (
-                <img src={thumbnailSrc} alt={file.name} />
-            ) : (
-                <div className="skeleton-loader" style={{width: '100%', height: '100%', background: 'rgba(128,128,128,0.1)'}}></div>
-            )}
-          </div>
-        ) : (
-          <div className="attachment-file-preview">
-            <div className="file-preview-icon">{getFileIcon(file.type)}</div>
-            <span className="file-preview-name">{file.name}</span>
-          </div>
-        )}
-        <Tooltip text={`Remove ${file.name}`}>
-          <button onClick={() => onRemove(file)} className="remove-attachment-btn">
-            <FiX size={14} />
-          </button>
-        </Tooltip>
-      </div>
-    );
+  const [thumbnailSrc, setThumbnailSrc] = useState<string | null>(null);
+  const isImage = file.type.startsWith('image/');
+
+  useEffect(() => {
+    let active = true;
+    if (isImage) {
+      generateThumbnail(file).then(src => {
+        if (active) setThumbnailSrc(src);
+      });
+    }
+    return () => { active = false; };
+  }, [file, isImage]);
+
+  return (
+    <div className="attachment-preview-wrapper">
+      {isImage ? (
+        <div className="attachment-thumbnail">
+          {thumbnailSrc ? (
+            <img src={thumbnailSrc} alt={file.name} />
+          ) : (
+            <div className="skeleton-loader" style={{ width: '100%', height: '100%', background: 'rgba(128,128,128,0.1)' }}></div>
+          )}
+        </div>
+      ) : (
+        <div className="attachment-file-preview">
+          <div className="file-preview-icon">{getFileIcon(file.type)}</div>
+          <span className="file-preview-name">{file.name}</span>
+        </div>
+      )}
+      <Tooltip text={`Remove ${file.name}`}>
+        <button onClick={() => onRemove(file)} className="remove-attachment-btn">
+          <FiX size={14} />
+        </button>
+      </Tooltip>
+    </div>
+  );
 });
 
 const ChatInput = ({ onSendMessage, onStopGeneration, isSending, isThinkingVisible }: ChatInputProps) => {
@@ -125,13 +125,14 @@ const ChatInput = ({ onSendMessage, onStopGeneration, isSending, isThinkingVisib
     };
   }, [isMenuOpen]);
 
-  const validateAndAddFiles = (files: File[]) => {
+const validateAndAddFiles = (files: File[]) => {
     const containsImage = files.some(f => f.type.startsWith('image/'));
 
     if (containsImage) {
       const modelConfigs = user?.modelConfigs || [];
       const modelConfig = modelConfigs.find(c => c.id === selectedModel);
-      const supportsImage = modelConfig?.modalities.includes('image');
+      const isDefaultProvider = user?.selectedProvider === 'default';
+      const supportsImage = modelConfig?.modalities.includes('image') || (isDefaultProvider && !modelConfig);
 
       if (!supportsImage) {
         showNotification('This model does not support image inputs. Please select a vision-capable model.', 'error');
@@ -147,7 +148,7 @@ const ChatInput = ({ onSendMessage, onStopGeneration, isSending, isThinkingVisib
 
     const filesToAdd = files.slice(0, remainingSlots);
     setSelectedFiles(prev => [...prev, ...filesToAdd]);
-    
+
     if (files.length > remainingSlots) {
       showNotification(`Only ${remainingSlots} file(s) added. Maximum 10 files allowed.`, 'error');
     }
@@ -184,7 +185,7 @@ const ChatInput = ({ onSendMessage, onStopGeneration, isSending, isThinkingVisib
     e.preventDefault();
     e.stopPropagation();
     dragCounterRef.current++;
-    
+
     if (e.dataTransfer.items && e.dataTransfer.items.length > 0) {
       setIsDragging(true);
     }
@@ -194,7 +195,7 @@ const ChatInput = ({ onSendMessage, onStopGeneration, isSending, isThinkingVisib
     e.preventDefault();
     e.stopPropagation();
     dragCounterRef.current--;
-    
+
     if (dragCounterRef.current === 0) {
       setIsDragging(false);
     }
@@ -216,7 +217,7 @@ const ChatInput = ({ onSendMessage, onStopGeneration, isSending, isThinkingVisib
       validateAndAddFiles(files);
     }
   };
-  
+
   const triggerFileInput = (ref: React.RefObject<HTMLInputElement | null>) => {
     if (ref.current) {
       ref.current.click();
@@ -295,7 +296,7 @@ const ChatInput = ({ onSendMessage, onStopGeneration, isSending, isThinkingVisib
   }, [text]);
 
   return (
-    <div 
+    <div
       className={`chat-input-container ${isDragging ? 'drag-active' : ''}`}
       onDragEnter={handleDragEnter}
       onDragLeave={handleDragLeave}
@@ -303,20 +304,20 @@ const ChatInput = ({ onSendMessage, onStopGeneration, isSending, isThinkingVisib
       onDrop={handleDrop}
     >
       {isProUser && (
-        <VoiceChatModal 
-          isOpen={isVoiceChatOpen} 
-          onClose={() => setIsVoiceChatOpen(false)} 
+        <VoiceChatModal
+          isOpen={isVoiceChatOpen}
+          onClose={() => setIsVoiceChatOpen(false)}
         />
       )}
-      
+
       {selectedFiles.length > 0 && (
         <div className="attachment-preview-area">
           {selectedFiles.map((file, index) => (
             // --- OPTIMIZATION: Use sub-component for resizing ---
-            <AttachmentPreviewItem 
-                key={`${file.name}-${index}`} 
-                file={file} 
-                onRemove={removeFile} 
+            <AttachmentPreviewItem
+              key={`${file.name}-${index}`}
+              file={file}
+              onRemove={removeFile}
             />
           ))}
         </div>
@@ -336,7 +337,7 @@ const ChatInput = ({ onSendMessage, onStopGeneration, isSending, isThinkingVisib
         </Tooltip>
 
         <div className="chat-input-divider" />
-        
+
         <button
           ref={plusButtonRef}
           className="chat-input-button"
@@ -344,7 +345,7 @@ const ChatInput = ({ onSendMessage, onStopGeneration, isSending, isThinkingVisib
         >
           <FiPlus size={20} />
         </button>
-        
+
         {isMenuOpen && (
           <div ref={menuRef} className="context-menu">
             <button className="context-menu-button" onClick={() => triggerFileInput(imageInputRef)}>
@@ -357,7 +358,7 @@ const ChatInput = ({ onSendMessage, onStopGeneration, isSending, isThinkingVisib
             </button>
           </div>
         )}
-        
+
         <textarea
           ref={textareaRef}
           className="chat-input"
@@ -383,7 +384,7 @@ const ChatInput = ({ onSendMessage, onStopGeneration, isSending, isThinkingVisib
             <>
               {!hasContent && (
                 <Tooltip text={voiceTooltip}>
-                  <button 
+                  <button
                     className={`chat-input-button mic-button ${isProUser ? '' : 'mic-button-disabled'}`}
                     onClick={() => {
                       if (!isProUser) {
