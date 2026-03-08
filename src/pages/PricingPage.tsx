@@ -13,6 +13,8 @@ const PricingPage = () => {
   const { showNotification } = useNotification();
   const [isLoading, setIsLoading] = useState(false);
 
+  const proPriceId = (import.meta as any).env?.VITE_STRIPE_PRO_PRICE_ID || '';
+
   const plans = [
     {
       name: 'Free',
@@ -29,7 +31,7 @@ const PricingPage = () => {
     {
       name: 'Pro',
       price: '$15',
-      priceId: 'price_1S98QdJHhdy0TngLXWUWBrzD',
+      priceId: proPriceId,
       features: [
         '10,000 monthly credits included',
         'OpenRouter default models (cheap/medium/expensive tiers)',
