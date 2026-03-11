@@ -1467,7 +1467,6 @@ const SettingsModal = ({ isOpen, onClose, initialTab = 'GPT' }: SettingsModalPro
     const isPro = status === 'active';
     const isCanceled = status === 'canceled';
     const isPaymentIssue = ['past_due', 'unpaid', 'incomplete'].includes(status || '');
-    const isFreeTier = !isPro && !isCanceled && !isPaymentIssue;
 
     const creditBalance = Math.max(0, Number(user?.creditBalance) || 0);
     const creditUsed = Math.max(0, Number(user?.creditUsed) || 0);
