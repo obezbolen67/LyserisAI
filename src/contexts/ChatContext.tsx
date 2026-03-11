@@ -69,7 +69,7 @@ const ChatContext = createContext<ChatContextType | undefined>(undefined);
 
 export const ChatProvider = ({ children }: { children: ReactNode }) => {
   const navigate = useNavigate();
-  const { token, selectedModel, user } = useSettings();
+  const { token, selectedModel, user, updateLocalUser } = useSettings();
   const { showNotification } = useNotification();
 
   const [messages, setMessages] = useState<Message[]>([]);
@@ -489,6 +489,12 @@ export const ChatProvider = ({ children }: { children: ReactNode }) => {
                     assistantMessageIndex = -1;
                     currentAssistantThinking = '';
                     break;
+
+                  case 'CREDITS_UPDATE':
+                    if (typeof event.balance === 'number') {
+                      updateLocalUser({ creditBalance: event.balance });
+                    }
+                    break;
                 }
               } catch (error) {
                 throw error;
@@ -513,7 +519,7 @@ export const ChatProvider = ({ children }: { children: ReactNode }) => {
         }
       }
     },
-    [stopGeneration, showNotification]
+    [stopGeneration, showNotification, updateLocalUser]
   );
 
   const sendMessage = async (text: string, attachments: Attachment[] = [], metadata?: Record<string, any>) => {

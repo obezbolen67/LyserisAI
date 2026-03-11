@@ -1,5 +1,5 @@
 // src/pages/MainAppLayout.tsx
-import { useEffect, useState, Suspense } from 'react';
+import { useEffect, useState, Suspense, useRef } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import Sidebar from '../components/Sidebar';
 import SettingsModal from '../components/SettingsModal';
@@ -39,6 +39,24 @@ const MainAppLayout = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { loadUser } = useSettings();
+  const hasRefreshedRef = useRef(false);
+
+  useEffect(() => {
+    if (hasRefreshedRef.current) return;
+    hasRefreshedRef.current = true;
+
+    const refresh = async () => {
+      try {
+        const res = await api('/stripe/refresh-subscription', { method: 'POST' });
+        if (res.ok) {
+          await loadUser();
+        }
+      } catch {
+        // Best-effort sync only
+      }
+    };
+    refresh();
+  }, [loadUser]);
 
   useEffect(() => {
     const params = new URLSearchParams(location.search);

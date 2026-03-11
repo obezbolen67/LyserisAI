@@ -76,6 +76,7 @@ interface SettingsContextType {
   register: (email: string, password: string) => Promise<void>;
   logout: () => void;
   updateSettings: (settings: Partial<User>) => Promise<void>;
+  updateLocalUser: (settings: Partial<User>) => void;
 }
 
 const SettingsContext = createContext<SettingsContextType | undefined>(undefined);
@@ -102,6 +103,10 @@ export const SettingsProvider = ({ children }: { children: ReactNode }) => {
     } catch (err) {
       throw err;
     }
+  };
+
+  const updateLocalUser = (settings: Partial<User>) => {
+    setUser((prev) => prev ? { ...prev, ...settings } : null);
   };
 
   const setTheme = (newTheme: Theme) => {
@@ -223,7 +228,7 @@ export const SettingsProvider = ({ children }: { children: ReactNode }) => {
         token, isAuthenticated, loading, user,
         models, setModels, theme, setTheme,
         selectedModel: user?.selectedModel || '',
-        loadUser, login, register, logout, updateSettings
+        loadUser, login, register, logout, updateSettings, updateLocalUser
       }}
     >
       {children}

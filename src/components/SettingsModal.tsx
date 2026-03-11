@@ -112,7 +112,7 @@ const voiceOptions: VoiceOption[] = [
 ];
 
 const SettingsModal = ({ isOpen, onClose, initialTab = 'GPT' }: SettingsModalProps) => {
-  const { user, updateSettings, theme, setTheme, loadUser } = useSettings();
+  const { user, updateSettings, theme, setTheme } = useSettings();
   const { showNotification } = useNotification();
   const navigate = useNavigate();
 
@@ -142,7 +142,6 @@ const SettingsModal = ({ isOpen, onClose, initialTab = 'GPT' }: SettingsModalPro
   const configMenuRef = useRef<HTMLDivElement | null>(null);
   const closeTimeoutRef = useRef<number | null>(null);
   const previewAudioRef = useRef<HTMLAudioElement | null>(null);
-  const hasRefreshedSubscriptionRef = useRef(false);
 
   const [isEditingContext, setIsEditingContext] = useState(false);
   const [editableContextValue, setEditableContextValue] = useState(String(MIN_CONTEXT));
@@ -319,12 +318,11 @@ const SettingsModal = ({ isOpen, onClose, initialTab = 'GPT' }: SettingsModalPro
 
   useEffect(() => {
     if (!isOpen) {
-      hasRefreshedSubscriptionRef.current = false;
       setIsApiKeyVisible(false);
       setOpenConfigMenuId(null);
       setIsEditingContext(false);
       setIsEditingMaxOutput(false);
-      setModelSearchQuery(''); // Reset search on close
+      setModelSearchQuery('');
       setShowSelectedOnly(false);
       setModelProviderFilters([]);
       setGptSection('general');
@@ -338,33 +336,6 @@ const SettingsModal = ({ isOpen, onClose, initialTab = 'GPT' }: SettingsModalPro
       }
     }
   }, [isOpen]);
-
-  useEffect(() => {
-    if (!isOpen) return;
-    if (activeTab !== 'Account') return;
-    if (hasRefreshedSubscriptionRef.current) return;
-
-    let cancelled = false;
-    const syncSubscription = async () => {
-      try {
-        const res = await api('/stripe/refresh-subscription', { method: 'POST' });
-        if (cancelled) return;
-        if (res.ok) {
-          await loadUser();
-        }
-      } catch {
-        // Best-effort sync only; no blocking UI error here.
-      } finally {
-        hasRefreshedSubscriptionRef.current = true;
-      }
-    };
-
-    syncSubscription();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [activeTab, isOpen, loadUser]);
 
   useEffect(() => {
     const handleDocumentClick = (event: MouseEvent) => {
@@ -1496,6 +1467,7 @@ const SettingsModal = ({ isOpen, onClose, initialTab = 'GPT' }: SettingsModalPro
     const isPro = status === 'active';
     const isCanceled = status === 'canceled';
     const isPaymentIssue = ['past_due', 'unpaid', 'incomplete'].includes(status || '');
+    const isFreeTier = !isPro && !isCanceled && !isPaymentIssue;
 
     const creditBalance = Math.max(0, Number(user?.creditBalance) || 0);
     const creditUsed = Math.max(0, Number(user?.creditUsed) || 0);

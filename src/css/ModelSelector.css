@@ -94,6 +94,25 @@
   background-color: var(--button-hover-bg);
 }
 
+.model-item.locked {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.model-item.locked:hover {
+  background-color: transparent;
+}
+
+.model-item.locked .model-item-name {
+  color: var(--secondary-text-color);
+}
+
+.model-item-lock {
+  color: var(--secondary-text-color);
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
 .model-item-icon {
   color: var(--secondary-text-color);
   flex-shrink: 0;

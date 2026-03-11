@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { useSettings } from '../contexts/SettingsContext';
-import { FiChevronDown, FiCheck } from 'react-icons/fi';
+import { FiChevronDown, FiCheck, FiLock } from 'react-icons/fi';
 import OpenAIIcon from '../icons/openai.svg?react';
 import AnthropicIcon from '../icons/anthropic.svg?react';
 import GeminiIcon from '../icons/gemini.svg?react';
@@ -15,12 +15,27 @@ type ActiveModelEntry = {
   intelligenceLevel?: number;
   displayName?: string;
   description?: string;
+  paidOnly?: boolean;
 };
 
 type OpenRouterModelMeta = {
   id: string;
   name?: string;
   description?: string;
+};
+
+type BackendModel = {
+  id: string;
+  provider: string;
+  tier: string;
+  displayName: string;
+  creditsPer1kTokens: number;
+  intelligenceLevel: number;
+  pricing?: {
+    inputPerMillion: number;
+    outputPerMillion: number;
+  };
+  paidOnly: boolean;
 };
 
 const buildModelMetaKey = (provider: string, modelId: string) => `${provider}:${modelId}`;
@@ -42,53 +57,38 @@ const providerIconMap: Record<string, React.ComponentType<React.SVGProps<SVGSVGE
   openrouter: OpenAIIcon,
 };
 
-const DEFAULT_OPENROUTER_MODELS = [
-  {
-    id: 'openai/gpt-5-mini',
-    provider: 'openrouter',
-    tier: 'cheap',
-    displayName: 'GPT-5 Mini',
-    creditsPer1kTokens: 0.5,
-    intelligenceLevel: 4,
-  },
-  {
-    id: 'moonshotai/kimi-k2.5',
-    provider: 'openrouter',
-    tier: 'medium',
-    displayName: 'Kimi K2.5',
-    creditsPer1kTokens: 1,
-    intelligenceLevel: 6,
-  },
-  {
-    id: 'openai/gpt-5.3-chat',
-    provider: 'openrouter',
-    tier: 'expensive',
-    displayName: 'GPT-5.3 Chat',
-    creditsPer1kTokens: 2.5,
-    intelligenceLevel: 8,
-  },
-];
-
-const getIntelligenceColor = (level: number) => {
-  const clamped = Math.min(10, Math.max(1, level));
-  const hue = Math.round(((clamped - 1) / 9) * 120);
-  return `hsl(${hue}, 78%, 45%)`;
-};
-
-const getIntelligenceBars = (level: number) => {
-  const clamped = Math.min(10, Math.max(1, level));
-  return Math.max(1, Math.round(clamped / 2));
-};
-
 const ModelSelector = () => {
   const { user, selectedModel, updateSettings, loading } = useSettings();
   const [isOpen, setIsOpen] = useState(false);
   const [hoveredModel, setHoveredModel] = useState<ActiveModelEntry | null>(null);
   const [tooltipTop, setTooltipTop] = useState<number | null>(null);
   const [modelMetaByKey, setModelMetaByKey] = useState<Record<string, OpenRouterModelMeta>>({});
+  const [backendModels, setBackendModels] = useState<BackendModel[]>([]);
   const hoverTimeoutRef = useRef<number | null>(null);
   const selectorRef = useRef<HTMLDivElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
+
+  const isPaidUser = user?.subscriptionStatus === 'active';
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const fetchBackendModels = async () => {
+      try {
+        const res = await api('/config/models');
+        if (!res.ok) return;
+        const models: BackendModel[] = await res.json();
+        if (!cancelled) {
+          setBackendModels(models);
+        }
+      } catch (error) {
+        console.error('Failed to fetch models from backend:', error);
+      }
+    };
+
+    fetchBackendModels();
+    return () => { cancelled = true; };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -162,19 +162,33 @@ const ModelSelector = () => {
       .map((config) => config.provider)
   );
 
-  // Group 1: Default Models
-  const defaultModels: ActiveModelEntry[] = DEFAULT_OPENROUTER_MODELS.map((model) => {
-    const fetchedModel = modelMetaByKey[buildModelMetaKey(model.provider, model.id)];
-    return {
-      id: model.id,
-      provider: model.provider,
-      isDefault: true,
-      creditsPer1kTokens: model.creditsPer1kTokens,
-      intelligenceLevel: model.intelligenceLevel,
-      displayName: fetchedModel?.name || model.displayName || humanizeModelName(model.id),
-      description: fetchedModel?.description,
-    };
-  }).sort((a, b) => (b.intelligenceLevel || 0) - (a.intelligenceLevel || 0));
+  const getIntelligenceColor = (level: number) => {
+    const clamped = Math.min(10, Math.max(1, level));
+    const hue = Math.round(((clamped - 1) / 9) * 120);
+    return `hsl(${hue}, 78%, 45%)`;
+  };
+
+  const getIntelligenceBars = (level: number) => {
+    const clamped = Math.min(10, Math.max(1, level));
+    return Math.max(1, Math.round(clamped / 2));
+  };
+
+  const defaultModels: ActiveModelEntry[] = backendModels
+    .filter((model) => isPaidUser || !model.paidOnly)
+    .map((model) => {
+      const fetchedModel = modelMetaByKey[buildModelMetaKey(model.provider, model.id)];
+      return {
+        id: model.id,
+        provider: model.provider,
+        isDefault: true,
+        creditsPer1kTokens: model.creditsPer1kTokens,
+        intelligenceLevel: model.intelligenceLevel,
+        displayName: fetchedModel?.name || model.displayName || humanizeModelName(model.id),
+        description: fetchedModel?.description,
+        paidOnly: model.paidOnly,
+      };
+    })
+    .sort((a, b) => (b.intelligenceLevel || 0) - (a.intelligenceLevel || 0));
 
   // Group 2: Other user-selected models
   const otherModels: ActiveModelEntry[] = quickAccessModelIds
@@ -199,9 +213,13 @@ const ModelSelector = () => {
   const activeModels = [...defaultModels, ...otherModels];
 
   const handleSelectModel = async (modelId: string, e: React.MouseEvent) => {
-    // Prevent event bubbling and default behavior to ensure the action captures
     e.preventDefault();
     e.stopPropagation();
+    
+    const model = activeModels.find((m) => m.id === modelId);
+    if (model?.paidOnly && !isPaidUser) {
+      return;
+    }
     
     if (modelId !== selectedModel) {
       await updateSettings({ selectedModel: modelId });
@@ -281,11 +299,12 @@ const ModelSelector = () => {
       {isOpen && (
         <div className="model-selector-dropdown" ref={dropdownRef}>
           {defaultModels.map((model) => {
+            const isLocked = model.paidOnly && !isPaidUser;
             return (
               <div 
                 key={`default:${model.provider}:${model.id}`}
-                className={`model-item ${selectedModel === model.id ? 'selected' : ''}`}
-                onMouseDown={(e) => handleSelectModel(model.id, e)}
+                className={`model-item ${selectedModel === model.id ? 'selected' : ''} ${isLocked ? 'locked' : ''}`}
+                onMouseDown={(e) => !isLocked && handleSelectModel(model.id, e)}
                 onMouseEnter={(event) => handleMouseEnter(model, event)}
                 onMouseLeave={handleMouseLeave}
                 role="button"
@@ -295,7 +314,8 @@ const ModelSelector = () => {
                 <div className="model-item-details">
                   <span className="model-item-name">{model.displayName || model.id}</span>
                 </div>
-                {selectedModel === model.id && <FiCheck size={18} className="model-item-check" />}
+                {isLocked && <FiLock size={16} className="model-item-lock" title="Pro only" />}
+                {selectedModel === model.id && !isLocked && <FiCheck size={18} className="model-item-check" />}
               </div>
             );
           })}
@@ -308,7 +328,6 @@ const ModelSelector = () => {
                 <div 
                   key={`${model.provider}:${model.id}`}
                   className={`model-item ${selectedModel === model.id ? 'selected' : ''}`}
-                  // Use onMouseDown to trigger before blur/focusout events
                   onMouseDown={(e) => handleSelectModel(model.id, e)}
                   onMouseEnter={(event) => handleMouseEnter(model, event)}
                   onMouseLeave={handleMouseLeave}
