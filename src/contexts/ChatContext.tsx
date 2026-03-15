@@ -88,12 +88,37 @@ export const ChatProvider = ({ children }: { children: ReactNode }) => {
 
   const streamAbortControllerRef = useRef<AbortController | null>(null);
   const messagesRef = useRef<Message[]>([]);
+  const activeChatIdRef = useRef<string | null>(null);
+  const currentStreamRequestIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     messagesRef.current = messages;
   }, [messages]);
 
+  useEffect(() => {
+    activeChatIdRef.current = activeChatId;
+  }, [activeChatId]);
+
   const toggleThinking = () => setThinkingEnabled((prev) => !prev);
+  const createStreamRequestId = () => {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+      return crypto.randomUUID();
+    }
+    return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  };
+
+  const stopGenerationOnServer = useCallback(async () => {
+    const chatId = activeChatIdRef.current;
+    const streamRequestId = currentStreamRequestIdRef.current;
+    if (!chatId || !streamRequestId) return;
+    try {
+      await api(`/chats/${chatId}/stop`, {
+        method: 'POST',
+        body: JSON.stringify({ streamRequestId }),
+      });
+    } catch {
+    }
+  }, []);
 
   const getLocalTime = () => {
     const now = new Date();
@@ -157,13 +182,15 @@ export const ChatProvider = ({ children }: { children: ReactNode }) => {
     if (streamAbortControllerRef.current) {
       streamAbortControllerRef.current.abort();
     }
+    stopGenerationOnServer();
     setIsStreaming(false);
     setIsThinking(false);
     setThinkingContent(null);
     setMessages((prev) => prev.filter((m) => !m.isWaiting));
     setIsSending(false);
     streamAbortControllerRef.current = null;
-  }, []);
+    currentStreamRequestIdRef.current = null;
+  }, [stopGenerationOnServer]);
 
   const streamAndSaveResponse = useCallback(
     async (
@@ -177,6 +204,8 @@ export const ChatProvider = ({ children }: { children: ReactNode }) => {
       setThinkingContent(null);
 
       streamAbortControllerRef.current = new AbortController();
+      const streamRequestId = createStreamRequestId();
+      currentStreamRequestIdRef.current = streamRequestId;
       let currentAssistantThinking = '';
       let assistantMessageIndex = -1;
       let streamEndedForClientTool = false;
@@ -220,7 +249,7 @@ export const ChatProvider = ({ children }: { children: ReactNode }) => {
       };
 
       try {
-        let finMetadata = {...(metadata || {}), client_time: getLocalTime()};
+        let finMetadata = {...(metadata || {}), client_time: getLocalTime(), streamRequestId};
 
         const response = await api(`/chats/${chatId}/stream`, {
           method: 'POST',
@@ -514,6 +543,7 @@ export const ChatProvider = ({ children }: { children: ReactNode }) => {
         if (streamEndedForClientTool) {
           setIsStreaming(false);
           streamAbortControllerRef.current = null;
+          currentStreamRequestIdRef.current = null;
         } else {
           stopGeneration();
         }
