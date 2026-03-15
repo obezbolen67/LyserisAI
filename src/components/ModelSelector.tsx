@@ -254,7 +254,7 @@ const ModelSelector = () => {
     const dropdownRect = dropdownRef.current?.getBoundingClientRect();
     const rowRect = event.currentTarget.getBoundingClientRect();
     if (dropdownRect) {
-      setTooltipTop(rowRect.top - dropdownRect.top + rowRect.height / 2);
+      setTooltipTop(rowRect.top - dropdownRect.top);
     }
 
     hoverTimeoutRef.current = window.setTimeout(() => {
@@ -298,61 +298,64 @@ const ModelSelector = () => {
 
       {isOpen && (
         <div className="model-selector-dropdown" ref={dropdownRef}>
-          {defaultModels.map((model) => {
-            const isLocked = model.paidOnly && !isPaidUser;
-            return (
-              <div 
-                key={`default:${model.provider}:${model.id}`}
-                className={`model-item ${selectedModel === model.id ? 'selected' : ''} ${isLocked ? 'locked' : ''}`}
-                onMouseDown={(e) => !isLocked && handleSelectModel(model.id, e)}
-                onMouseEnter={(event) => handleMouseEnter(model, event)}
-                onMouseLeave={handleMouseLeave}
-                role="button"
-                tabIndex={0}
-              >
-                <img src="/lyseris.svg" alt="Lyseris" className="model-item-icon model-item-site-icon" />
-                <div className="model-item-details">
-                  <span className="model-item-name">{model.displayName || model.id}</span>
-                </div>
-                {isLocked && <FiLock size={16} className="model-item-lock" title="Pro only" />}
-                {selectedModel === model.id && !isLocked && <FiCheck size={18} className="model-item-check" />}
-              </div>
-            );
-          })}
-
-          {otherModels.length > 0 && <div className="model-selector-divider" />}
-
-          {otherModels.map((model) => {
-              const ProviderIcon = providerIconMap[model.provider];
+          <div className="model-selector-list">
+            {defaultModels.map((model) => {
+              const isLocked = model.paidOnly && !isPaidUser;
               return (
                 <div 
-                  key={`${model.provider}:${model.id}`}
-                  className={`model-item ${selectedModel === model.id ? 'selected' : ''}`}
-                  onMouseDown={(e) => handleSelectModel(model.id, e)}
+                  key={`default:${model.provider}:${model.id}`}
+                  className={`model-item ${selectedModel === model.id ? 'selected' : ''} ${isLocked ? 'locked' : ''}`}
+                  onMouseDown={(e) => !isLocked && handleSelectModel(model.id, e)}
                   onMouseEnter={(event) => handleMouseEnter(model, event)}
                   onMouseLeave={handleMouseLeave}
                   role="button"
                   tabIndex={0}
                 >
-                  {ProviderIcon ? (
-                    <ProviderIcon className="model-item-icon provider-model-icon" />
-                  ) : (
-                    <div className="model-item-icon provider-icon-fallback">{model.provider.charAt(0).toUpperCase()}</div>
-                  )}
+                  <img src="/lyseris.svg" alt="Lyseris" className="model-item-icon model-item-site-icon" />
                   <div className="model-item-details">
                     <span className="model-item-name">{model.displayName || model.id}</span>
                     <span className="model-item-description">{model.provider}</span>
                   </div>
-                  {selectedModel === model.id && <FiCheck size={18} className="model-item-check" />}
+                  {isLocked && <FiLock size={16} className="model-item-lock" title="Pro only" />}
+                  {selectedModel === model.id && !isLocked && <FiCheck size={18} className="model-item-check" />}
                 </div>
               );
-          })}
+            })}
+
+            {otherModels.length > 0 && <div className="model-selector-divider" />}
+
+            {otherModels.map((model) => {
+                const ProviderIcon = providerIconMap[model.provider];
+                return (
+                  <div 
+                    key={`${model.provider}:${model.id}`}
+                    className={`model-item ${selectedModel === model.id ? 'selected' : ''}`}
+                    onMouseDown={(e) => handleSelectModel(model.id, e)}
+                    onMouseEnter={(event) => handleMouseEnter(model, event)}
+                    onMouseLeave={handleMouseLeave}
+                    role="button"
+                    tabIndex={0}
+                  >
+                    {ProviderIcon ? (
+                      <ProviderIcon className="model-item-icon provider-model-icon" />
+                    ) : (
+                      <div className="model-item-icon provider-icon-fallback">{model.provider.charAt(0).toUpperCase()}</div>
+                    )}
+                    <div className="model-item-details">
+                      <span className="model-item-name">{model.displayName || model.id}</span>
+                      <span className="model-item-description">{model.provider}</span>
+                    </div>
+                    {selectedModel === model.id && <FiCheck size={18} className="model-item-check" />}
+                  </div>
+                );
+            })}
           
-          {activeModels.length === 0 && (
-             <div className="model-item-empty">
-               Configure Active Models in Settings.
-             </div>
-          )}
+            {activeModels.length === 0 && (
+              <div className="model-item-empty">
+                Configure Active Models in Settings.
+              </div>
+            )}
+          </div>
 
           {hoveredModel && (hoveredModel.isDefault || hoveredModel.description) && (
             <div className="model-hover-tooltip" style={{ top: tooltipTop ?? undefined }}>
@@ -388,7 +391,11 @@ const ModelSelector = () => {
               {hoveredModel.description && (
                 <>
                   <div className="tooltip-divider" />
-                  <div className="tooltip-description">{hoveredModel.description}</div>
+                  <div className="tooltip-description">
+                    {hoveredModel.description.length > 500
+                      ? `${hoveredModel.description.slice(0, 500)}...`
+                      : hoveredModel.description}
+                  </div>
                 </>
               )}
             </div>

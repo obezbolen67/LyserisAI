@@ -59,17 +59,47 @@
   left: 50%;
   transform: translateX(-50%);
   width: 320px;
-  max-height: calc(10 * 52px);
+  box-sizing: border-box;
   background-color: var(--main-bg-color);
   border: 1px solid var(--border-color);
   border-radius: 12px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
   padding: 0.5rem;
-  overflow-y: auto;
-  overscroll-behavior: contain;
+  padding-right: 0.75rem;
   z-index: 100;
   opacity: 0;
   animation: fadeInDropdown 0.2s ease forwards;
+}
+
+.model-selector-list {
+  max-height: calc(10 * 52px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(140, 140, 160, 0.45) transparent;
+}
+
+.model-selector-list::-webkit-scrollbar {
+  width: 8px;
+}
+
+.model-selector-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.model-selector-list::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, rgba(170, 170, 190, 0.55), rgba(120, 120, 150, 0.45));
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+.model-selector-list::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, rgba(180, 180, 210, 0.7), rgba(130, 130, 165, 0.6));
+  border: 2px solid transparent;
+  background-clip: padding-box;
 }
 
 @keyframes fadeInDropdown {
@@ -84,13 +114,15 @@
 }
 
 .model-item {
-  display: flex;
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
   align-items: center;
   padding: 0.75rem;
+  padding-right: 1rem;
   border-radius: 8px;
   cursor: pointer;
   transition: background-color 0.2s ease;
-  gap: 1rem;
+  column-gap: 0.75rem;
 }
 
 .model-item:hover {
@@ -113,12 +145,16 @@
 .model-item-lock {
   color: var(--secondary-text-color);
   flex-shrink: 0;
-  margin-left: auto;
+  margin-left: 0;
+  grid-column: 3;
 }
 
 .model-item-icon {
   color: var(--secondary-text-color);
   flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  grid-column: 1;
 }
 
 .model-item.selected .model-item-icon {
@@ -138,24 +174,39 @@
 }
 
 .model-item-details {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-rows: auto auto;
   flex-grow: 1;
+  min-width: 0;
+  padding-right: 0.4rem;
+  grid-column: 2;
+  align-content: center;
+  row-gap: 0.32rem;
 }
 
 .model-item-name {
   color: var(--primary-text-color);
   font-weight: 500;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .model-item-description {
-  font-size: 11px;
-  color: var(--text-secondary);
+  font-size: 12px;
+  color: var(--secondary-text-color);
+  display: block;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.25;
+  margin-top: 0;
+  transform: translateY(2px);
+  opacity: 1;
 }
 
 .model-item-check {
   color: var(--primary-text-color);
   flex-shrink: 0;
+  grid-column: 3;
 }
 
 .model-item-empty {
@@ -181,8 +232,8 @@
 .model-hover-tooltip {
   position: absolute;
   left: calc(100% + 10px);
-  top: 50%;
-  transform: translateY(-50%);
+  top: 0;
+  transform: none;
   min-width: 180px;
   padding: 10px 12px;
   border-radius: 10px;
@@ -283,10 +334,10 @@
 @keyframes modelTooltipIn {
   from {
     opacity: 0;
-    transform: translateY(-50%) translateX(-4px) scale(0.98);
+    transform: translateX(-4px) scale(0.98);
   }
   to {
     opacity: 1;
-    transform: translateY(-50%) translateX(0) scale(1);
+    transform: translateX(0) scale(1);
   }
 }
